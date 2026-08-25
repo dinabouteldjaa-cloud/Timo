@@ -7,6 +7,7 @@ import TasksPage from './features/tasks/TasksPage';
 import CalendarPage from './features/calendar/CalendarPage';
 import FocusPage from './features/focus/FocusPage';
 import ProfilePage from './features/profile/ProfilePage';
+import RemindersPage from './features/reminders/RemindersPage';
 import LoginPage from './features/auth/LoginPage';
 import SignupPage from './features/auth/SignupPage';
 import ForgotPasswordPage from './features/auth/ForgotPasswordPage';
@@ -57,6 +58,7 @@ export default function App() {
                         <Route path="/calendar" element={<CalendarPage />} />
                         <Route path="/focus" element={<FocusPage />} />
                         <Route path="/profile" element={<ProfilePage />} />
+                        <Route path="/reminders" element={<RemindersPage />} />
                       </Routes>
                     </AppShell>
                   </AppStateProvider>

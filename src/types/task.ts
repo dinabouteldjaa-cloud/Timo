@@ -35,3 +35,17 @@ export interface CalendarEvent {
   location?: string;
   eventType: CalendarEventType;
 }
+
+export interface Reminder {
+  id: string;
+  title: string;
+  notes?: string;
+  // ISO 8601 timestamp (stored as timestamptz in Postgres, always UTC on
+  // the wire). Built from — and displayed using — the device's local
+  // timezone via the native Date object; never hardcode a timezone.
+  remindAt: string;
+  completed: boolean;
+  completedAt?: string;
+  taskId?: string;
+  eventId?: string;
+}

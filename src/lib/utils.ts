@@ -54,3 +54,37 @@ export function formatDuration(minutes: number, t: Strings) {
   const rest = minutes % 60;
   return rest === 0 ? `${hours}h` : `${hours}h${rest}`;
 }
+
+/**
+ * Combines a 'YYYY-MM-DD' date and 'HH:MM' time — both interpreted in the
+ * device's local timezone — into an ISO 8601 UTC timestamp suitable for a
+ * Postgres `timestamptz` column. Never hardcodes a timezone; always uses
+ * whatever timezone the browser/device is currently in.
+ */
+export function localDateTimeToISOString(dateISO: string, time: string): string {
+  const [y, m, d] = dateISO.split('-').map(Number);
+  const [h, min] = time.split(':').map(Number);
+  return new Date(y, m - 1, d, h, min).toISOString();
+}
+
+/**
+ * Splits a stored UTC timestamp back into local-timezone 'YYYY-MM-DD' date
+ * and 'HH:MM' time strings, for populating date/time form inputs.
+ */
+export function isoStringToLocalDateTime(iso: string): { date: string; time: string } {
+  const date = new Date(iso);
+  return {
+    date: toISODate(date),
+    time: `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`,
+  };
+}
+
+/** Formats a stored UTC timestamp as a short local time, e.g. "10:00 AM". */
+export function formatLocalTime(iso: string): string {
+  return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(iso));
+}
+
+/** Formats a stored UTC timestamp as a short local date, e.g. "Aug 25". */
+export function formatLocalShortDate(iso: string): string {
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(new Date(iso));
+}
