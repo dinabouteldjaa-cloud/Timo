@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react';
 import Button from '../../components/ui/Button';
 import Badge from '../../components/ui/Badge';
 import { parseISODate } from '../../lib/utils';
-import type { CalendarEvent } from '../../types/task';
+import { formatReminderLabel } from '../../lib/reminderPresets';
+import type { CalendarEvent, Reminder } from '../../types/task';
 import './EventDetailsSheet.css';
 
 interface EventDetailsSheetProps {
   open: boolean;
   event: CalendarEvent | null;
+  reminder?: Reminder | null;
   onClose: () => void;
   onEdit: () => void;
   onDelete: () => void | Promise<void>;
@@ -16,6 +18,7 @@ interface EventDetailsSheetProps {
 export default function EventDetailsSheet({
   open,
   event,
+  reminder,
   onClose,
   onEdit,
   onDelete,
@@ -93,6 +96,15 @@ export default function EventDetailsSheet({
             <div className="event-details-description">
               <span className="event-details-row__label">Description</span>
               <p className="event-details-description__text">{event.description}</p>
+            </div>
+          )}
+
+          {reminder && (
+            <div className="event-details-row">
+              <span className="event-details-row__label">Reminder</span>
+              <span className="event-details-row__value">
+                {formatReminderLabel(reminder.remindAt, reminder.offsetMinutes, 'At start time')}
+              </span>
             </div>
           )}
 

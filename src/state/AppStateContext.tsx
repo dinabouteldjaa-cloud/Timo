@@ -15,6 +15,7 @@ import { useAuth } from './AuthContext';
 import * as tasksApi from '../lib/tasksApi';
 import * as eventsApi from '../lib/calendarEventsApi';
 import * as remindersApi from '../lib/remindersApi';
+import type { ReminderSchedule } from '../lib/remindersApi';
 
 // ---------------------------------------------------------------------------
 // Shared app state.
@@ -23,7 +24,17 @@ import * as remindersApi from '../lib/remindersApi';
 // src/lib/tasksApi.ts and src/lib/calendarEventsApi.ts) and scoped to the
 // signed-in user via RLS. The focus session/timer below is still purely
 // local/in-memory — focus session persistence is a later phase.
+//
+// Reminders are NOT a standalone item: a reminder is purely "when Timo
+// should notify the user about a Task or Event", configured from within
+// that task/event's own sheet. addTask/updateTask/addEvent/updateEvent
+// below accept an optional `reminder` selection and handle creating,
+// replacing, or clearing the associated reminder row as part of the same
+// save. Deleting a task/event cascades its reminder at the database level
+// (see supabase/migrations/0005_reminders_refactor.sql).
 // ---------------------------------------------------------------------------
+
+export type ReminderSelection = ReminderSchedule;
 
 export interface NewTaskInput {
   title: string;
@@ -33,6 +44,8 @@ export interface NewTaskInput {
   priority: TaskPriority;
   category: TaskCategory;
   estimatedMinutes?: number;
+  /** null = no reminder / clear the existing one. */
+  reminder: ReminderSelection | null;
 }
 
 export interface NewEventInput {
@@ -44,14 +57,8 @@ export interface NewEventInput {
   allDay: boolean;
   location?: string;
   eventType: CalendarEventType;
-}
-
-export interface NewReminderInput {
-  title: string;
-  notes?: string;
-  remindAt: string;
-  taskId?: string;
-  eventId?: string;
+  /** null = no reminder / clear the existing one. */
+  reminder: ReminderSelection | null;
 }
 
 type FocusStatus = 'idle' | 'running' | 'paused' | 'completed';
@@ -85,13 +92,12 @@ interface AppStateValue {
   updateEvent: (id: string, input: NewEventInput) => Promise<void>;
   deleteEvent: (id: string) => Promise<void>;
 
+  // Read-only: reminders are only ever mutated via the task/event calls
+  // above. Consumers look up `reminders.find(r => r.taskId === task.id)`
+  // etc. to know whether an item has a reminder and what it is.
   reminders: Reminder[];
   remindersLoading: boolean;
   remindersError: string | null;
-  addReminder: (input: NewReminderInput) => Promise<void>;
-  updateReminder: (id: string, input: NewReminderInput) => Promise<void>;
-  toggleReminder: (id: string) => Promise<void>;
-  deleteReminder: (id: string) => Promise<void>;
 
   focusSession: FocusSessionState;
   focusStats: FocusStatsState;
@@ -115,6 +121,85 @@ function toMinutes(time: string): number {
 export function AppStateProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const userId = user?.id ?? null;
+
+  // --- Reminders (loaded once per session; mutated only via tasks/events) --
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [remindersLoading, setRemindersLoading] = useState(false);
+  const [remindersError, setRemindersError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!userId) {
+      setReminders([]);
+      setRemindersError(null);
+      return;
+    }
+    let cancelled = false;
+    setRemindersLoading(true);
+    setRemindersError(null);
+    remindersApi
+      .fetchReminders(userId)
+      .then((loaded) => {
+        if (!cancelled) setReminders(loaded);
+      })
+      .catch((err: Error) => {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] fetchReminders failed', err);
+        if (!cancelled) setRemindersError(err.message || 'Could not load reminders.');
+      })
+      .finally(() => {
+        if (!cancelled) setRemindersLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  /** Applies a reminder selection for a task, after the task itself has been saved. Never throws — surfaces via remindersError instead, so a reminder-save failure never undoes a successful task/event save. */
+  const applyTaskReminder = useCallback(
+    async (taskId: string, reminder: ReminderSelection | null) => {
+      if (!userId) return;
+      try {
+        if (reminder) {
+          const saved = await remindersApi.upsertReminderForTask(userId, taskId, reminder);
+          setReminders((prev) => [...prev.filter((r) => r.taskId !== taskId), saved]);
+        } else {
+          await remindersApi.clearReminderForTask(taskId);
+          setReminders((prev) => prev.filter((r) => r.taskId !== taskId));
+        }
+        setRemindersError(null);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] applyTaskReminder failed', err);
+        setRemindersError(
+          err instanceof Error ? err.message : 'The task was saved, but its reminder could not be saved.',
+        );
+      }
+    },
+    [userId],
+  );
+
+  const applyEventReminder = useCallback(
+    async (eventId: string, reminder: ReminderSelection | null) => {
+      if (!userId) return;
+      try {
+        if (reminder) {
+          const saved = await remindersApi.upsertReminderForEvent(userId, eventId, reminder);
+          setReminders((prev) => [...prev.filter((r) => r.eventId !== eventId), saved]);
+        } else {
+          await remindersApi.clearReminderForEvent(eventId);
+          setReminders((prev) => prev.filter((r) => r.eventId !== eventId));
+        }
+        setRemindersError(null);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] applyEventReminder failed', err);
+        setRemindersError(
+          err instanceof Error ? err.message : 'The event was saved, but its reminder could not be saved.',
+        );
+      }
+    },
+    [userId],
+  );
 
   // --- Tasks ------------------------------------------------------------
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -156,6 +241,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       try {
         const created = await tasksApi.createTask(userId, input);
         setTasks((prev) => [created, ...prev]);
+        await applyTaskReminder(created.id, input.reminder);
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('[AppState] addTask failed', err);
@@ -163,21 +249,25 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         throw err;
       }
     },
-    [userId],
+    [userId, applyTaskReminder],
   );
 
-  const updateTask = useCallback(async (id: string, input: NewTaskInput) => {
-    setTasksError(null);
-    try {
-      const updated = await tasksApi.updateTask(id, input);
-      setTasks((prev) => prev.map((task) => (task.id === id ? updated : task)));
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('[AppState] updateTask failed', err);
-      setTasksError(err instanceof Error ? err.message : 'Could not update task.');
-      throw err;
-    }
-  }, []);
+  const updateTask = useCallback(
+    async (id: string, input: NewTaskInput) => {
+      setTasksError(null);
+      try {
+        const updated = await tasksApi.updateTask(id, input);
+        setTasks((prev) => prev.map((task) => (task.id === id ? updated : task)));
+        await applyTaskReminder(id, input.reminder);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] updateTask failed', err);
+        setTasksError(err instanceof Error ? err.message : 'Could not update task.');
+        throw err;
+      }
+    },
+    [applyTaskReminder],
+  );
 
   const toggleTask = useCallback(
     async (id: string) => {
@@ -206,19 +296,26 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     [tasks],
   );
 
-  const deleteTask = useCallback(async (id: string) => {
-    const previous = tasks;
-    setTasks((prev) => prev.filter((task) => task.id !== id));
-    try {
-      await tasksApi.deleteTask(id);
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('[AppState] deleteTask failed', err);
-      setTasks(previous);
-      setTasksError(err instanceof Error ? err.message : 'Could not delete task.');
-      throw err;
-    }
-  }, [tasks]);
+  const deleteTask = useCallback(
+    async (id: string) => {
+      const previousTasks = tasks;
+      const previousReminders = reminders;
+      setTasks((prev) => prev.filter((task) => task.id !== id));
+      // The DB cascades the reminder delete automatically; mirror it locally too.
+      setReminders((prev) => prev.filter((reminder) => reminder.taskId !== id));
+      try {
+        await tasksApi.deleteTask(id);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] deleteTask failed', err);
+        setTasks(previousTasks);
+        setReminders(previousReminders);
+        setTasksError(err instanceof Error ? err.message : 'Could not delete task.');
+        throw err;
+      }
+    },
+    [tasks, reminders],
+  );
 
   // --- Calendar events ----------------------------------------------------
   const [events, setEvents] = useState<CalendarEvent[]>([]);
@@ -259,6 +356,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       try {
         const created = await eventsApi.createEvent(userId, input);
         setEvents((prev) => [...prev, created]);
+        await applyEventReminder(created.id, input.reminder);
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('[AppState] addEvent failed', err);
@@ -266,37 +364,45 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         throw err;
       }
     },
-    [userId],
+    [userId, applyEventReminder],
   );
 
-  const updateEvent = useCallback(async (id: string, input: NewEventInput) => {
-    setEventsError(null);
-    try {
-      const updated = await eventsApi.updateEvent(id, input);
-      setEvents((prev) => prev.map((event) => (event.id === id ? updated : event)));
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('[AppState] updateEvent failed', err);
-      setEventsError(err instanceof Error ? err.message : 'Could not update event.');
-      throw err;
-    }
-  }, []);
+  const updateEvent = useCallback(
+    async (id: string, input: NewEventInput) => {
+      setEventsError(null);
+      try {
+        const updated = await eventsApi.updateEvent(id, input);
+        setEvents((prev) => prev.map((event) => (event.id === id ? updated : event)));
+        await applyEventReminder(id, input.reminder);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] updateEvent failed', err);
+        setEventsError(err instanceof Error ? err.message : 'Could not update event.');
+        throw err;
+      }
+    },
+    [applyEventReminder],
+  );
 
   const deleteEvent = useCallback(
     async (id: string) => {
-      const previous = events;
+      const previousEvents = events;
+      const previousReminders = reminders;
       setEvents((prev) => prev.filter((event) => event.id !== id));
+      // The DB cascades the reminder delete automatically; mirror it locally too.
+      setReminders((prev) => prev.filter((reminder) => reminder.eventId !== id));
       try {
         await eventsApi.deleteEvent(id);
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('[AppState] deleteEvent failed', err);
-        setEvents(previous);
+        setEvents(previousEvents);
+        setReminders(previousReminders);
         setEventsError(err instanceof Error ? err.message : 'Could not delete event.');
         throw err;
       }
     },
-    [events],
+    [events, reminders],
   );
 
   // The next upcoming event/meeting from now, used by Today's "Up next" card.
@@ -321,122 +427,6 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
     return upcoming[0] ?? null;
   }, [events]);
-
-  // --- Reminders ------------------------------------------------------
-  const [reminders, setReminders] = useState<Reminder[]>([]);
-  const [remindersLoading, setRemindersLoading] = useState(false);
-  const [remindersError, setRemindersError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!userId) {
-      setReminders([]);
-      setRemindersError(null);
-      return;
-    }
-    let cancelled = false;
-    setRemindersLoading(true);
-    setRemindersError(null);
-    remindersApi
-      .fetchReminders(userId)
-      .then((loaded) => {
-        if (!cancelled) setReminders(loaded);
-      })
-      .catch((err: Error) => {
-        // eslint-disable-next-line no-console
-        console.error('[AppState] fetchReminders failed', err);
-        if (!cancelled) setRemindersError(err.message || 'Could not load reminders.');
-      })
-      .finally(() => {
-        if (!cancelled) setRemindersLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [userId]);
-
-  const addReminder = useCallback(
-    async (input: NewReminderInput) => {
-      if (!userId) return;
-      setRemindersError(null);
-      try {
-        const created = await remindersApi.createReminder(userId, input);
-        setReminders((prev) =>
-          [...prev, created].sort((a, b) => (a.remindAt < b.remindAt ? -1 : 1)),
-        );
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error('[AppState] addReminder failed', err);
-        setRemindersError(err instanceof Error ? err.message : 'Could not create reminder.');
-        throw err;
-      }
-    },
-    [userId],
-  );
-
-  const updateReminder = useCallback(async (id: string, input: NewReminderInput) => {
-    setRemindersError(null);
-    try {
-      const updated = await remindersApi.updateReminder(id, input);
-      setReminders((prev) =>
-        prev
-          .map((reminder) => (reminder.id === id ? updated : reminder))
-          .sort((a, b) => (a.remindAt < b.remindAt ? -1 : 1)),
-      );
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('[AppState] updateReminder failed', err);
-      setRemindersError(err instanceof Error ? err.message : 'Could not update reminder.');
-      throw err;
-    }
-  }, []);
-
-  const toggleReminder = useCallback(
-    async (id: string) => {
-      const current = reminders.find((reminder) => reminder.id === id);
-      if (!current) return;
-      const nextCompleted = !current.completed;
-
-      // Optimistic update so checkboxes feel instant.
-      setReminders((prev) =>
-        prev.map((reminder) =>
-          reminder.id === id ? { ...reminder, completed: nextCompleted } : reminder,
-        ),
-      );
-
-      try {
-        const updated = await remindersApi.setReminderCompleted(id, nextCompleted);
-        setReminders((prev) => prev.map((reminder) => (reminder.id === id ? updated : reminder)));
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error('[AppState] toggleReminder failed', err);
-        // Roll back on failure.
-        setReminders((prev) =>
-          prev.map((reminder) =>
-            reminder.id === id ? { ...reminder, completed: current.completed } : reminder,
-          ),
-        );
-        setRemindersError(err instanceof Error ? err.message : 'Could not update reminder.');
-      }
-    },
-    [reminders],
-  );
-
-  const deleteReminder = useCallback(
-    async (id: string) => {
-      const previous = reminders;
-      setReminders((prev) => prev.filter((reminder) => reminder.id !== id));
-      try {
-        await remindersApi.deleteReminder(id);
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error('[AppState] deleteReminder failed', err);
-        setReminders(previous);
-        setRemindersError(err instanceof Error ? err.message : 'Could not delete reminder.');
-        throw err;
-      }
-    },
-    [reminders],
-  );
 
   // --- Focus session (local-only, unchanged from previous phase) ------
   const [focusSession, setFocusSession] = useState<FocusSessionState>({
@@ -560,10 +550,6 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       reminders,
       remindersLoading,
       remindersError,
-      addReminder,
-      updateReminder,
-      toggleReminder,
-      deleteReminder,
       focusSession,
       focusStats,
       selectFocusTask,
@@ -591,10 +577,6 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       reminders,
       remindersLoading,
       remindersError,
-      addReminder,
-      updateReminder,
-      toggleReminder,
-      deleteReminder,
       focusSession,
       focusStats,
       selectFocusTask,

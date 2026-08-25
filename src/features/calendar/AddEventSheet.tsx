@@ -1,12 +1,19 @@
 import { useEffect, useState } from 'react';
 import Button from '../../components/ui/Button';
-import type { NewEventInput } from '../../state/AppStateContext';
-import type { CalendarEvent, CalendarEventType } from '../../types/task';
+import ReminderPicker, {
+  emptyReminderValue,
+  type ReminderPickerValue,
+} from '../../components/ui/ReminderPicker';
+import type { NewEventInput, ReminderSelection } from '../../state/AppStateContext';
+import { computeRemindAt, minutesForPreset, presetForOffset } from '../../lib/reminderPresets';
+import { localDateTimeToISOString, isoStringToLocalDateTime } from '../../lib/utils';
+import type { CalendarEvent, CalendarEventType, Reminder } from '../../types/task';
 import './AddEventSheet.css';
 
 interface AddEventSheetProps {
   open: boolean;
   event?: CalendarEvent | null;
+  existingReminder?: Reminder | null;
   defaultDate?: string;
   onClose: () => void;
   onSave: (input: NewEventInput) => void | Promise<void>;
@@ -41,28 +48,45 @@ function formFromEvent(event: CalendarEvent) {
   };
 }
 
+function reminderValueFromExisting(reminder?: Reminder | null): ReminderPickerValue {
+  if (!reminder) return emptyReminderValue();
+  const { date, time } = isoStringToLocalDateTime(reminder.remindAt);
+  return {
+    preset: presetForOffset(reminder.offsetMinutes),
+    customDate: date,
+    customTime: time,
+  };
+}
+
 export default function AddEventSheet({
   open,
   event,
+  existingReminder,
   defaultDate,
   onClose,
   onSave,
   onDelete,
 }: AddEventSheetProps) {
   const [form, setForm] = useState(event ? formFromEvent(event) : emptyForm(defaultDate));
+  const [reminderValue, setReminderValue] = useState<ReminderPickerValue>(
+    reminderValueFromExisting(existingReminder),
+  );
   const [titleTouched, setTitleTouched] = useState(false);
   const [dateTouched, setDateTouched] = useState(false);
+  const [reminderError, setReminderError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const isEditing = Boolean(event);
 
   useEffect(() => {
     if (open) {
       setForm(event ? formFromEvent(event) : emptyForm(defaultDate));
+      setReminderValue(reminderValueFromExisting(existingReminder));
       setTitleTouched(false);
       setDateTouched(false);
+      setReminderError(null);
       setSaving(false);
     }
-  }, [open, event, defaultDate]);
+  }, [open, event, existingReminder, defaultDate]);
 
   if (!open) return null;
 
@@ -73,6 +97,24 @@ export default function AddEventSheet({
     onClose();
   }
 
+  function resolveReminder(): ReminderSelection | null | 'invalid' {
+    if (reminderValue.preset === 'none') return null;
+    if (reminderValue.preset === 'custom') {
+      if (!reminderValue.customDate || !reminderValue.customTime) return 'invalid';
+      return {
+        remindAt: localDateTimeToISOString(reminderValue.customDate, reminderValue.customTime),
+      };
+    }
+    // Relative preset — needs the event's own date + start time (all-day
+    // events have no start time, so relative presets aren't offered then).
+    if (!form.date || form.allDay || !form.startTime) return 'invalid';
+    const minutes = minutesForPreset(reminderValue.preset) ?? 0;
+    return {
+      remindAt: computeRemindAt(form.date, form.startTime, minutes),
+      offsetMinutes: minutes,
+    };
+  }
+
   async function handleSave() {
     const titleInvalid = form.title.trim().length === 0;
     const dateInvalid = form.date.trim().length === 0;
@@ -81,6 +123,12 @@ export default function AddEventSheet({
       setDateTouched(true);
       return;
     }
+    const reminder = resolveReminder();
+    if (reminder === 'invalid') {
+      setReminderError('Add a reminder date and time, or choose an event start time first.');
+      return;
+    }
+    setReminderError(null);
     setSaving(true);
     try {
       await onSave({
@@ -92,6 +140,7 @@ export default function AddEventSheet({
         allDay: form.allDay,
         location: form.location || undefined,
         eventType: form.eventType,
+        reminder,
       });
     } finally {
       setSaving(false);
@@ -223,6 +272,15 @@ export default function AddEventSheet({
               onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
             />
           </label>
+
+          <ReminderPicker
+            value={reminderValue}
+            onChange={setReminderValue}
+            parentDate={form.date || undefined}
+            parentTime={form.allDay ? undefined : form.startTime || undefined}
+            atLabel="At start time"
+            customError={reminderError ?? undefined}
+          />
 
           {isEditing && onDelete && (
             <button type="button" className="add-event-delete" onClick={handleDelete} disabled={saving}>

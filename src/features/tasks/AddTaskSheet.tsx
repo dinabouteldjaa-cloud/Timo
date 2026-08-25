@@ -1,13 +1,20 @@
 import { useEffect, useState } from 'react';
 import Button from '../../components/ui/Button';
+import ReminderPicker, {
+  emptyReminderValue,
+  type ReminderPickerValue,
+} from '../../components/ui/ReminderPicker';
 import { useLocale } from '../../i18n/LocaleContext';
-import type { NewTaskInput } from '../../state/AppStateContext';
-import type { Task, TaskCategory, TaskPriority } from '../../types/task';
+import type { NewTaskInput, ReminderSelection } from '../../state/AppStateContext';
+import { computeRemindAt, minutesForPreset, presetForOffset } from '../../lib/reminderPresets';
+import { localDateTimeToISOString, isoStringToLocalDateTime } from '../../lib/utils';
+import type { Reminder, Task, TaskCategory, TaskPriority } from '../../types/task';
 import './AddTaskSheet.css';
 
 interface AddTaskSheetProps {
   open: boolean;
   task?: Task | null;
+  existingReminder?: Reminder | null;
   onClose: () => void;
   onSave: (input: NewTaskInput) => void | Promise<void>;
   onDelete?: () => void | Promise<void>;
@@ -38,20 +45,43 @@ function formFromTask(task: Task) {
   };
 }
 
-export default function AddTaskSheet({ open, task, onClose, onSave, onDelete }: AddTaskSheetProps) {
+function reminderValueFromExisting(reminder?: Reminder | null): ReminderPickerValue {
+  if (!reminder) return emptyReminderValue();
+  const { date, time } = isoStringToLocalDateTime(reminder.remindAt);
+  return {
+    preset: presetForOffset(reminder.offsetMinutes),
+    customDate: date,
+    customTime: time,
+  };
+}
+
+export default function AddTaskSheet({
+  open,
+  task,
+  existingReminder,
+  onClose,
+  onSave,
+  onDelete,
+}: AddTaskSheetProps) {
   const { t } = useLocale();
   const [form, setForm] = useState(task ? formFromTask(task) : emptyForm);
+  const [reminderValue, setReminderValue] = useState<ReminderPickerValue>(
+    reminderValueFromExisting(existingReminder),
+  );
   const [titleTouched, setTitleTouched] = useState(false);
+  const [reminderError, setReminderError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const isEditing = Boolean(task);
 
   useEffect(() => {
     if (open) {
       setForm(task ? formFromTask(task) : emptyForm);
+      setReminderValue(reminderValueFromExisting(existingReminder));
       setTitleTouched(false);
+      setReminderError(null);
       setSaving(false);
     }
-  }, [open, task]);
+  }, [open, task, existingReminder]);
 
   if (!open) return null;
 
@@ -61,11 +91,34 @@ export default function AddTaskSheet({ open, task, onClose, onSave, onDelete }: 
     onClose();
   }
 
+  function resolveReminder(): ReminderSelection | null | 'invalid' {
+    if (reminderValue.preset === 'none') return null;
+    if (reminderValue.preset === 'custom') {
+      if (!reminderValue.customDate || !reminderValue.customTime) return 'invalid';
+      return {
+        remindAt: localDateTimeToISOString(reminderValue.customDate, reminderValue.customTime),
+      };
+    }
+    // Relative preset — needs the task's own date+time to count back from.
+    if (!form.date || !form.time) return 'invalid';
+    const minutes = minutesForPreset(reminderValue.preset) ?? 0;
+    return {
+      remindAt: computeRemindAt(form.date, form.time, minutes),
+      offsetMinutes: minutes,
+    };
+  }
+
   async function handleSave() {
     if (form.title.trim().length === 0) {
       setTitleTouched(true);
       return;
     }
+    const reminder = resolveReminder();
+    if (reminder === 'invalid') {
+      setReminderError('Add a reminder date and time, or choose a task date/time first.');
+      return;
+    }
+    setReminderError(null);
     setSaving(true);
     try {
       await onSave({
@@ -76,6 +129,7 @@ export default function AddTaskSheet({ open, task, onClose, onSave, onDelete }: 
         priority: form.priority,
         category: form.category,
         estimatedMinutes: form.duration ? Number(form.duration) : undefined,
+        reminder,
       });
     } finally {
       setSaving(false);
@@ -192,6 +246,15 @@ export default function AddTaskSheet({ open, task, onClose, onSave, onDelete }: 
               onChange={(e) => setForm((f) => ({ ...f, duration: e.target.value }))}
             />
           </label>
+
+          <ReminderPicker
+            value={reminderValue}
+            onChange={setReminderValue}
+            parentDate={form.date || undefined}
+            parentTime={form.time || undefined}
+            atLabel="At time"
+            customError={reminderError ?? undefined}
+          />
 
           {isEditing && onDelete && (
             <button type="button" className="add-task-delete" onClick={handleDelete} disabled={saving}>

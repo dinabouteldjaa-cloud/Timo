@@ -10,28 +10,14 @@ import { useLocale, formatString } from '../../i18n/LocaleContext';
 import { getGreetingKey, formatFriendlyDate } from '../../lib/utils';
 import { focusSuggestion } from '../../data/mockData';
 import { useAppState } from '../../state/AppStateContext';
-import { toISODate } from '../../lib/utils';
-import ReminderRow from '../reminders/ReminderRow';
 import AddTaskSheet from '../tasks/AddTaskSheet';
 import './TodayPage.css';
-
-const TODAY_ISO = toISODate(new Date());
 
 export default function TodayPage() {
   const { t, locale } = useLocale();
   const navigate = useNavigate();
-  const {
-    tasks,
-    tasksLoading,
-    toggleTask,
-    addTask,
-    eventsLoading,
-    upcomingEvent,
-    events,
-    reminders,
-    remindersLoading,
-    toggleReminder,
-  } = useAppState();
+  const { tasks, tasksLoading, toggleTask, addTask, eventsLoading, upcomingEvent, reminders } =
+    useAppState();
   const [quickAddOpen, setQuickAddOpen] = useState(false);
 
   const greeting = t.today[getGreetingKey()];
@@ -41,9 +27,9 @@ export default function TodayPage() {
   const completed = tasks.filter((task) => task.status === 'completed').length;
   const progressPct = tasks.length === 0 ? 0 : (completed / tasks.length) * 100;
 
-  const todaysReminders = reminders
-    .filter((r) => !r.completed && toISODate(new Date(r.remindAt)) === TODAY_ISO)
-    .slice(0, 3);
+  const taskIdsWithReminder = new Set(
+    reminders.filter((r) => r.taskId).map((r) => r.taskId as string),
+  );
 
   return (
     <>
@@ -98,33 +84,6 @@ export default function TodayPage() {
           )}
         </Card>
 
-        {/* Reminders */}
-        <div>
-          <div className="today-section-header">
-            <p className="today-section-label">Reminders</p>
-            <button className="today-section-link" onClick={() => navigate('/reminders')}>
-              {t.today.seeAll}
-            </button>
-          </div>
-          <Card padding="md">
-            {remindersLoading ? (
-              <p className="today-empty">Loading…</p>
-            ) : todaysReminders.length === 0 ? (
-              <p className="today-empty">No reminders for today.</p>
-            ) : (
-              todaysReminders.map((reminder) => (
-                <ReminderRow
-                  key={reminder.id}
-                  reminder={reminder}
-                  tasks={tasks}
-                  events={events}
-                  onToggle={toggleReminder}
-                />
-              ))
-            )}
-          </Card>
-        </div>
-
         {/* Focus suggestion */}
         <Card padding="md" className="today-focus-card">
           <div className="today-focus-card__row">
@@ -157,7 +116,12 @@ export default function TodayPage() {
               <p className="today-empty">{t.today.noTasksToday}</p>
             ) : (
               todaysTasks.map((task) => (
-                <TaskRow key={task.id} task={task} onToggle={toggleTask} />
+                <TaskRow
+                  key={task.id}
+                  task={task}
+                  onToggle={toggleTask}
+                  hasReminder={taskIdsWithReminder.has(task.id)}
+                />
               ))
             )}
           </Card>

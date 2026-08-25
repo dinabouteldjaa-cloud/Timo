@@ -31,6 +31,13 @@
   text-decoration: line-through;
 }
 
+.task-row__reminder-icon {
+  display: inline-block;
+  margin-left: 6px;
+  color: var(--color-text-faint);
+  vertical-align: -1px;
+}
+
 .task-row__meta {
   display: flex;
   align-items: center;

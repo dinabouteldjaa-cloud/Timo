@@ -50,7 +50,7 @@ function toMinutes(time: string): number {
 
 export default function CalendarPage() {
   const { t } = useLocale();
-  const { events, eventsLoading, eventsError, addEvent, updateEvent, deleteEvent, tasks } =
+  const { events, eventsLoading, eventsError, addEvent, updateEvent, deleteEvent, tasks, reminders } =
     useAppState();
 
   const [view, setView] = useState<View>('month');
@@ -253,7 +253,32 @@ export default function CalendarPage() {
                     </div>
                     <div className="calendar-event-row__line" />
                     <div className="calendar-event-row__body">
-                      <p className="calendar-event-row__title">{item.event.title}</p>
+                      <p className="calendar-event-row__title">
+                        {item.event.title}
+                        {reminders.some((r) => r.eventId === item.event.id) && (
+                          <svg
+                            className="calendar-event-row__reminder-icon"
+                            width="12"
+                            height="12"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            aria-label="Reminder set"
+                          >
+                            <path
+                              d="M12 4a5 5 0 00-5 5v3.2c0 .5-.18.98-.5 1.36L5 15.5c-.6.7-.1 1.8.8 1.8h12.4c.9 0 1.4-1.1.8-1.8l-1.5-1.94a2.1 2.1 0 01-.5-1.36V9a5 5 0 00-5-5z"
+                              stroke="currentColor"
+                              strokeWidth="1.6"
+                              strokeLinejoin="round"
+                            />
+                            <path
+                              d="M10 19.5a2 2 0 004 0"
+                              stroke="currentColor"
+                              strokeWidth="1.6"
+                              strokeLinecap="round"
+                            />
+                          </svg>
+                        )}
+                      </p>
                       {item.event.location && (
                         <p className="calendar-event-row__meta">{item.event.location}</p>
                       )}
@@ -287,6 +312,9 @@ export default function CalendarPage() {
       <AddEventSheet
         open={sheetOpen}
         event={editingEvent}
+        existingReminder={
+          editingEvent ? reminders.find((r) => r.eventId === editingEvent.id) ?? null : null
+        }
         defaultDate={selectedDate}
         onClose={closeSheet}
         onSave={async (input) => {
@@ -310,6 +338,7 @@ export default function CalendarPage() {
       <EventDetailsSheet
         open={Boolean(detailsEvent)}
         event={detailsEvent}
+        reminder={detailsEvent ? reminders.find((r) => r.eventId === detailsEvent.id) ?? null : null}
         onClose={closeDetails}
         onEdit={editFromDetails}
         onDelete={async () => {

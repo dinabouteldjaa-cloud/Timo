@@ -17,7 +17,7 @@ const todayISO = new Date().toISOString().slice(0, 10);
 
 export default function TasksPage() {
   const { t } = useLocale();
-  const { tasks, tasksLoading, tasksError, toggleTask, addTask, updateTask, deleteTask } =
+  const { tasks, tasksLoading, tasksError, toggleTask, addTask, updateTask, deleteTask, reminders } =
     useAppState();
   const [filter, setFilter] = useState<Filter>('all');
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -80,7 +80,13 @@ export default function TasksPage() {
             <EmptyState title={t.tasks.emptyTitle} subtitle={t.tasks.emptySubtitle} />
           ) : (
             filtered.map((task) => (
-              <TaskRow key={task.id} task={task} onToggle={toggleTask} onOpen={openEdit} />
+              <TaskRow
+                key={task.id}
+                task={task}
+                onToggle={toggleTask}
+                onOpen={openEdit}
+                hasReminder={reminders.some((r) => r.taskId === task.id)}
+              />
             ))
           )}
         </Card>
@@ -95,6 +101,9 @@ export default function TasksPage() {
       <AddTaskSheet
         open={sheetOpen}
         task={editingTask}
+        existingReminder={
+          editingTask ? reminders.find((r) => r.taskId === editingTask.id) ?? null : null
+        }
         onClose={closeSheet}
         onSave={async (input) => {
           if (editingTask) {

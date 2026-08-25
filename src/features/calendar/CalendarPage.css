@@ -206,6 +206,13 @@
   color: var(--color-text-muted);
 }
 
+.calendar-event-row__reminder-icon {
+  display: inline-block;
+  margin-left: 6px;
+  color: var(--color-text-faint);
+  vertical-align: -1px;
+}
+
 .calendar-event-row--clickable {
   width: 100%;
   border: none;
