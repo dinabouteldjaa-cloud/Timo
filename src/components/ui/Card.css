@@ -1,0 +1,28 @@
+.card {
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-soft);
+  box-shadow: var(--shadow-sm);
+}
+
+.card--pad-none {
+  padding: 0;
+}
+.card--pad-sm {
+  padding: var(--space-3) var(--space-4);
+}
+.card--pad-md {
+  padding: var(--space-5);
+}
+.card--pad-lg {
+  padding: var(--space-6);
+}
+
+.card--interactive {
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.card--interactive:active {
+  transform: scale(0.98);
+  box-shadow: var(--shadow-xs);
+}

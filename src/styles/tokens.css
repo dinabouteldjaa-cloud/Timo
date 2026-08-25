@@ -1,0 +1,67 @@
+:root {
+  /* Brand blue */
+  --color-primary: #3452F0;
+  --color-primary-dark: #2436A8;
+  --color-primary-light: #6C81F7;
+  --color-primary-soft: #EAEEFE;
+
+  /* Surfaces */
+  --color-bg: #F6F7FB;
+  --color-surface: #FFFFFF;
+  --color-surface-alt: #EEF1FB;
+  --color-surface-sunken: #F0F1F7;
+
+  /* Text */
+  --color-text: #171A2B;
+  --color-text-muted: #666B85;
+  --color-text-faint: #9498AD;
+  --color-text-on-primary: #FFFFFF;
+
+  /* Status */
+  --color-success: #1AA97A;
+  --color-success-soft: #E4F7EF;
+  --color-warning: #E8930E;
+  --color-warning-soft: #FDF1DC;
+  --color-error: #E5484D;
+  --color-error-soft: #FCE7E7;
+
+  /* Priority accents */
+  --color-priority-low: #6C81F7;
+  --color-priority-medium: #E8930E;
+  --color-priority-high: #E5484D;
+
+  /* Borders & dividers */
+  --color-border: #E5E7F1;
+  --color-border-soft: #EFF1F8;
+
+  /* Shadows */
+  --shadow-xs: 0 1px 2px rgba(23, 26, 43, 0.04);
+  --shadow-sm: 0 2px 8px rgba(23, 26, 43, 0.06);
+  --shadow-md: 0 8px 24px rgba(23, 26, 43, 0.09);
+  --shadow-lg: 0 16px 40px rgba(23, 26, 43, 0.14);
+
+  /* Radius */
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 22px;
+  --radius-xl: 28px;
+  --radius-pill: 999px;
+
+  /* Spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  /* Layout */
+  --max-content-width: 480px;
+  --bottom-nav-height: 64px;
+  --header-height: 56px;
+
+  /* Typography */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}

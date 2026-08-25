@@ -1,0 +1,133 @@
+.focus-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-2) var(--space-5) var(--space-6);
+}
+
+.focus-timer-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-5);
+  background: linear-gradient(180deg, var(--color-primary-soft), var(--color-surface) 60%);
+}
+
+.focus-ring {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.focus-ring__label {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.focus-ring__time {
+  font-size: 30px;
+  font-weight: 800;
+  color: var(--color-text);
+  letter-spacing: -0.02em;
+}
+
+.focus-ring__sub {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.focus-duration-row {
+  display: flex;
+  gap: 8px;
+}
+
+.focus-duration-chip {
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
+  padding: 9px 16px;
+  border-radius: var(--radius-pill);
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.focus-duration-chip--active {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-text-on-primary);
+}
+
+.focus-section-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin: 0 0 var(--space-2);
+}
+
+.focus-task-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: var(--space-4) var(--space-5);
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.focus-task-option + .focus-task-option {
+  border-top: 1px solid var(--color-border-soft);
+}
+
+.focus-task-option__radio {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.focus-task-option--active .focus-task-option__radio {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  box-shadow: inset 0 0 0 3px var(--color-surface);
+}
+
+.focus-empty-note {
+  font-size: 12.5px;
+  color: var(--color-text-faint);
+  margin: var(--space-2) 0 0;
+}
+
+.focus-stats-row {
+  display: flex;
+  gap: var(--space-6);
+}
+
+.focus-stat {
+  display: flex;
+  flex-direction: column;
+}
+
+.focus-stat__value {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--color-primary-dark);
+}
+
+.focus-stat__label {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  font-weight: 600;
+}

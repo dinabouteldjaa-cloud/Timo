@@ -1,0 +1,44 @@
+.tasks-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-5) var(--space-6);
+}
+
+.tasks-filters {
+  gap: var(--space-2);
+  padding-bottom: 2px;
+}
+
+.tasks-filter {
+  border: none;
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  padding: 9px 16px;
+  border-radius: var(--radius-pill);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.tasks-filter--active {
+  background: var(--color-primary);
+  color: var(--color-text-on-primary);
+}
+
+.tasks-fab {
+  position: fixed;
+  bottom: calc(var(--bottom-nav-height) + var(--space-4));
+  right: max(calc((100vw - var(--max-content-width)) / 2 + var(--space-5)), var(--space-5));
+  width: 56px;
+  height: 56px;
+  background: var(--color-primary);
+  box-shadow: 0 8px 20px rgba(52, 82, 240, 0.38);
+  z-index: 40;
+}
+
+.tasks-fab:hover {
+  background: var(--color-primary-dark);
+}
