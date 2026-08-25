@@ -9,6 +9,7 @@ import { useAppState } from '../../state/AppStateContext';
 import { addDays, getWeekDates, parseISODate, toISODate } from '../../lib/utils';
 import type { CalendarEvent, Task } from '../../types/task';
 import AddEventSheet from './AddEventSheet';
+import EventDetailsSheet from './EventDetailsSheet';
 import './CalendarPage.css';
 
 type View = 'month' | 'week' | 'day';
@@ -56,6 +57,7 @@ export default function CalendarPage() {
   const [selectedDate, setSelectedDate] = useState(TODAY_ISO);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
+  const [detailsEvent, setDetailsEvent] = useState<CalendarEvent | null>(null);
 
   const referenceMonth = parseISODate(selectedDate);
   const cells = buildMonthGrid(referenceMonth);
@@ -102,8 +104,18 @@ export default function CalendarPage() {
     setSheetOpen(true);
   }
 
-  function openEdit(event: CalendarEvent) {
-    setEditingEvent(event);
+  function openDetails(event: CalendarEvent) {
+    setDetailsEvent(event);
+  }
+
+  function closeDetails() {
+    setDetailsEvent(null);
+  }
+
+  function editFromDetails() {
+    if (!detailsEvent) return;
+    setEditingEvent(detailsEvent);
+    setDetailsEvent(null);
     setSheetOpen(true);
   }
 
@@ -234,7 +246,7 @@ export default function CalendarPage() {
                   <button
                     key={`event-${item.event.id}`}
                     className="calendar-event-row calendar-event-row--clickable"
-                    onClick={() => openEdit(item.event)}
+                    onClick={() => openDetails(item.event)}
                   >
                     <div className="calendar-event-row__time">
                       {item.event.allDay ? 'All day' : item.event.startTime ?? ''}
@@ -293,6 +305,18 @@ export default function CalendarPage() {
               }
             : undefined
         }
+      />
+
+      <EventDetailsSheet
+        open={Boolean(detailsEvent)}
+        event={detailsEvent}
+        onClose={closeDetails}
+        onEdit={editFromDetails}
+        onDelete={async () => {
+          if (!detailsEvent) return;
+          await deleteEvent(detailsEvent.id);
+          closeDetails();
+        }}
       />
     </>
   );
