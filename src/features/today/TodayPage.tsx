@@ -8,7 +8,7 @@ import TaskRow from '../../components/ui/TaskRow';
 import TimoAvatar from '../../components/avatar/TimoAvatar';
 import { useLocale, formatString } from '../../i18n/LocaleContext';
 import { getGreetingKey, formatFriendlyDate } from '../../lib/utils';
-import { mockEvents, focusSuggestion } from '../../data/mockData';
+import { focusSuggestion } from '../../data/mockData';
 import { useAppState } from '../../state/AppStateContext';
 import AddTaskSheet from '../tasks/AddTaskSheet';
 import './TodayPage.css';
@@ -16,12 +16,11 @@ import './TodayPage.css';
 export default function TodayPage() {
   const { t, locale } = useLocale();
   const navigate = useNavigate();
-  const { tasks, tasksLoading, toggleTask, addTask } = useAppState();
+  const { tasks, tasksLoading, toggleTask, addTask, eventsLoading, upcomingEvent } = useAppState();
   const [quickAddOpen, setQuickAddOpen] = useState(false);
 
   const greeting = t.today[getGreetingKey()];
   const dateLabel = useMemo(() => formatFriendlyDate(locale), [locale]);
-  const upNext = mockEvents[0];
 
   const todaysTasks = tasks.filter((task) => task.status !== 'completed').slice(0, 4);
   const completed = tasks.filter((task) => task.status === 'completed').length;
@@ -58,21 +57,27 @@ export default function TodayPage() {
         </Button>
 
         {/* Up next */}
-        {upNext && (
-          <Card padding="md">
-            <p className="today-section-label">{t.today.upNext}</p>
+        <Card padding="md">
+          <p className="today-section-label">{t.today.upNext}</p>
+          {eventsLoading ? (
+            <p className="today-empty">Loading…</p>
+          ) : upcomingEvent ? (
             <div className="today-upnext">
               <div className="today-upnext__time">
-                <span>{upNext.startTime}</span>
+                <span>{upcomingEvent.allDay ? 'All day' : upcomingEvent.startTime ?? ''}</span>
               </div>
               <div className="today-upnext__divider" />
               <div className="today-upnext__body">
-                <p className="today-upnext__title">{upNext.title}</p>
-                {upNext.location && <p className="today-upnext__location">{upNext.location}</p>}
+                <p className="today-upnext__title">{upcomingEvent.title}</p>
+                {upcomingEvent.location && (
+                  <p className="today-upnext__location">{upcomingEvent.location}</p>
+                )}
               </div>
             </div>
-          </Card>
-        )}
+          ) : (
+            <p className="today-empty">Nothing coming up on your calendar.</p>
+          )}
+        </Card>
 
         {/* Focus suggestion */}
         <Card padding="md" className="today-focus-card">

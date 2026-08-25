@@ -8,16 +8,19 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { Task, TaskCategory, TaskPriority } from '../types/task';
+import type { CalendarEvent, CalendarEventType, Task, TaskCategory, TaskPriority } from '../types/task';
 import { focusSuggestion } from '../data/mockData';
+import { toISODate } from '../lib/utils';
 import { useAuth } from './AuthContext';
 import * as tasksApi from '../lib/tasksApi';
+import * as eventsApi from '../lib/calendarEventsApi';
 
 // ---------------------------------------------------------------------------
 // Shared app state.
 //
-// Tasks are now backed by Supabase (see src/lib/tasksApi.ts) and scoped to
-// the signed-in user via RLS. The focus session/timer below is still purely
+// Tasks and calendar events are both backed by Supabase (see
+// src/lib/tasksApi.ts and src/lib/calendarEventsApi.ts) and scoped to the
+// signed-in user via RLS. The focus session/timer below is still purely
 // local/in-memory — focus session persistence is a later phase.
 // ---------------------------------------------------------------------------
 
@@ -29,6 +32,17 @@ export interface NewTaskInput {
   priority: TaskPriority;
   category: TaskCategory;
   estimatedMinutes?: number;
+}
+
+export interface NewEventInput {
+  title: string;
+  description?: string;
+  eventDate: string;
+  startTime?: string;
+  endTime?: string;
+  allDay: boolean;
+  location?: string;
+  eventType: CalendarEventType;
 }
 
 type FocusStatus = 'idle' | 'running' | 'paused' | 'completed';
@@ -54,6 +68,14 @@ interface AppStateValue {
   toggleTask: (id: string) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
 
+  events: CalendarEvent[];
+  eventsLoading: boolean;
+  eventsError: string | null;
+  upcomingEvent: CalendarEvent | null;
+  addEvent: (input: NewEventInput) => Promise<void>;
+  updateEvent: (id: string, input: NewEventInput) => Promise<void>;
+  deleteEvent: (id: string) => Promise<void>;
+
   focusSession: FocusSessionState;
   focusStats: FocusStatsState;
   selectFocusTask: (id: string) => void;
@@ -68,10 +90,16 @@ const AppStateContext = createContext<AppStateValue | undefined>(undefined);
 
 const DEFAULT_DURATION = 25;
 
+function toMinutes(time: string): number {
+  const [h, m] = time.split(':').map(Number);
+  return h * 60 + m;
+}
+
 export function AppStateProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const userId = user?.id ?? null;
 
+  // --- Tasks ------------------------------------------------------------
   const [tasks, setTasks] = useState<Task[]>([]);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [tasksError, setTasksError] = useState<string | null>(null);
@@ -174,6 +202,108 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       throw err;
     }
   }, [tasks]);
+
+  // --- Calendar events ----------------------------------------------------
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
+  const [eventsError, setEventsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!userId) {
+      setEvents([]);
+      setEventsError(null);
+      return;
+    }
+    let cancelled = false;
+    setEventsLoading(true);
+    setEventsError(null);
+    eventsApi
+      .fetchEvents(userId)
+      .then((loaded) => {
+        if (!cancelled) setEvents(loaded);
+      })
+      .catch((err: Error) => {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] fetchEvents failed', err);
+        if (!cancelled) setEventsError(err.message || 'Could not load calendar events.');
+      })
+      .finally(() => {
+        if (!cancelled) setEventsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  const addEvent = useCallback(
+    async (input: NewEventInput) => {
+      if (!userId) return;
+      setEventsError(null);
+      try {
+        const created = await eventsApi.createEvent(userId, input);
+        setEvents((prev) => [...prev, created]);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] addEvent failed', err);
+        setEventsError(err instanceof Error ? err.message : 'Could not create event.');
+        throw err;
+      }
+    },
+    [userId],
+  );
+
+  const updateEvent = useCallback(async (id: string, input: NewEventInput) => {
+    setEventsError(null);
+    try {
+      const updated = await eventsApi.updateEvent(id, input);
+      setEvents((prev) => prev.map((event) => (event.id === id ? updated : event)));
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[AppState] updateEvent failed', err);
+      setEventsError(err instanceof Error ? err.message : 'Could not update event.');
+      throw err;
+    }
+  }, []);
+
+  const deleteEvent = useCallback(
+    async (id: string) => {
+      const previous = events;
+      setEvents((prev) => prev.filter((event) => event.id !== id));
+      try {
+        await eventsApi.deleteEvent(id);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] deleteEvent failed', err);
+        setEvents(previous);
+        setEventsError(err instanceof Error ? err.message : 'Could not delete event.');
+        throw err;
+      }
+    },
+    [events],
+  );
+
+  // The next upcoming event/meeting from now, used by Today's "Up next" card.
+  const upcomingEvent = useMemo(() => {
+    const now = new Date();
+    const nowISO = toISODate(now);
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+    const upcoming = events
+      .filter((event) => {
+        if (event.eventDate > nowISO) return true;
+        if (event.eventDate < nowISO) return false;
+        if (event.allDay || !event.startTime) return true;
+        return toMinutes(event.startTime) >= nowMinutes;
+      })
+      .sort((a, b) => {
+        if (a.eventDate !== b.eventDate) return a.eventDate < b.eventDate ? -1 : 1;
+        const aOrder = a.allDay ? -1 : a.startTime ? toMinutes(a.startTime) : 24 * 60;
+        const bOrder = b.allDay ? -1 : b.startTime ? toMinutes(b.startTime) : 24 * 60;
+        return aOrder - bOrder;
+      });
+
+    return upcoming[0] ?? null;
+  }, [events]);
 
   // --- Focus session (local-only, unchanged from previous phase) ------
   const [focusSession, setFocusSession] = useState<FocusSessionState>({
@@ -287,6 +417,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       updateTask,
       toggleTask,
       deleteTask,
+      events,
+      eventsLoading,
+      eventsError,
+      upcomingEvent,
+      addEvent,
+      updateEvent,
+      deleteEvent,
       focusSession,
       focusStats,
       selectFocusTask,
@@ -304,6 +441,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       updateTask,
       toggleTask,
       deleteTask,
+      events,
+      eventsLoading,
+      eventsError,
+      upcomingEvent,
+      addEvent,
+      updateEvent,
+      deleteEvent,
       focusSession,
       focusStats,
       selectFocusTask,

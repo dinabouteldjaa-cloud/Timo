@@ -1,5 +1,5 @@
-import type { PostgrestError } from '@supabase/supabase-js';
 import { supabase } from './supabaseClient';
+import { toSupabaseError } from './supabaseErrors';
 import type { Task, TaskCategory, TaskPriority, TaskStatus } from '../types/task';
 
 // ---------------------------------------------------------------------------
@@ -22,29 +22,6 @@ interface TaskRow {
   completed_at: string | null;
   created_at: string;
   updated_at: string;
-}
-
-/**
- * Supabase/PostgREST errors are plain objects ({ message, details, hint, code }),
- * NOT instances of the built-in `Error` — so `err instanceof Error` checks
- * upstream would silently swallow them and fall back to a generic message.
- * This wraps them in a real `Error` (with the original info attached) so the
- * actual cause is preserved and can be surfaced/logged.
- */
-function toError(context: string, error: PostgrestError): Error {
-  const parts = [error.message];
-  if (error.code) parts.push(`code: ${error.code}`);
-  if (error.hint) parts.push(`hint: ${error.hint}`);
-  const err = new Error(`${context}: ${parts.join(' — ')}`);
-  // Non-secret diagnostic fields only — never includes credentials/tokens.
-  Object.assign(err, {
-    code: error.code,
-    details: error.details,
-    hint: error.hint,
-  });
-  // eslint-disable-next-line no-console
-  console.error(`[tasksApi] ${context}`, error);
-  return err;
 }
 
 function rowToTask(row: TaskRow): Task {
@@ -79,7 +56,7 @@ export async function fetchTasks(userId: string): Promise<Task[]> {
     .eq('user_id', userId)
     .order('created_at', { ascending: false });
 
-  if (error) throw toError('Could not load tasks', error);
+  if (error) throw toSupabaseError('Could not load tasks', error);
   return (data as TaskRow[]).map(rowToTask);
 }
 
@@ -99,7 +76,7 @@ export async function createTask(userId: string, input: TaskInput): Promise<Task
     .select('*')
     .single();
 
-  if (error) throw toError('Could not create task', error);
+  if (error) throw toSupabaseError('Could not create task', error);
   return rowToTask(data as TaskRow);
 }
 
@@ -122,7 +99,7 @@ export async function updateTask(
     .select('*')
     .single();
 
-  if (error) throw toError('Could not update task', error);
+  if (error) throw toSupabaseError('Could not update task', error);
   return rowToTask(data as TaskRow);
 }
 
@@ -137,11 +114,11 @@ export async function setTaskStatus(taskId: string, status: TaskStatus): Promise
     .select('*')
     .single();
 
-  if (error) throw toError('Could not update task status', error);
+  if (error) throw toSupabaseError('Could not update task status', error);
   return rowToTask(data as TaskRow);
 }
 
 export async function deleteTask(taskId: string): Promise<void> {
   const { error } = await supabase.from('tasks').delete().eq('id', taskId);
-  if (error) throw toError('Could not delete task', error);
+  if (error) throw toSupabaseError('Could not delete task', error);
 }

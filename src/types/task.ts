@@ -22,12 +22,16 @@ export interface Task {
   estimatedMinutes?: number;
 }
 
+export type CalendarEventType = 'event' | 'meeting';
+
 export interface CalendarEvent {
   id: string;
   title: string;
-  date: string; // ISO date
-  startTime: string; // "10:00"
-  endTime: string; // "10:30"
-  type: 'event' | 'task';
+  description?: string;
+  eventDate: string; // ISO date, e.g. 2026-08-24
+  startTime?: string; // "10:00" — absent when allDay is true
+  endTime?: string; // "10:30" — absent when allDay is true
+  allDay: boolean;
   location?: string;
+  eventType: CalendarEventType;
 }

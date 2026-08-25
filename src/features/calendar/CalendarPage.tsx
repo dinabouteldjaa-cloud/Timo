@@ -1,15 +1,26 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import Header from '../../components/layout/Header';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
 import EmptyState from '../../components/ui/EmptyState';
 import IconButton from '../../components/ui/IconButton';
 import { useLocale } from '../../i18n/LocaleContext';
-import { mockEvents, APP_TODAY_ISO } from '../../data/mockData';
-import { addDays, getWeekDates, parseISODate } from '../../lib/utils';
+import { useAppState } from '../../state/AppStateContext';
+import { addDays, getWeekDates, parseISODate, toISODate } from '../../lib/utils';
+import type { CalendarEvent, Task } from '../../types/task';
+import AddEventSheet from './AddEventSheet';
 import './CalendarPage.css';
 
 type View = 'month' | 'week' | 'day';
+
+// A single row in the merged agenda: either a real calendar event or a task
+// with a due date, shown side by side but never stored together — tasks
+// stay in `tasks`, events stay in `calendar_events`.
+type AgendaItem =
+  | { kind: 'event'; sortKey: number; event: CalendarEvent }
+  | { kind: 'task'; sortKey: number; task: Task };
+
+const TODAY_ISO = toISODate(new Date());
 
 function buildMonthGrid(reference: Date) {
   const year = reference.getFullYear();
@@ -31,22 +42,75 @@ function isoForDay(reference: Date, day: number) {
   return `${y}-${m}-${d}`;
 }
 
+function toMinutes(time: string): number {
+  const [h, m] = time.split(':').map(Number);
+  return h * 60 + m;
+}
+
 export default function CalendarPage() {
   const { t } = useLocale();
+  const { events, eventsLoading, eventsError, addEvent, updateEvent, deleteEvent, tasks } =
+    useAppState();
+
   const [view, setView] = useState<View>('month');
-  const [selectedDate, setSelectedDate] = useState(APP_TODAY_ISO);
+  const [selectedDate, setSelectedDate] = useState(TODAY_ISO);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
 
   const referenceMonth = parseISODate(selectedDate);
   const cells = buildMonthGrid(referenceMonth);
-  const eventDates = new Set(mockEvents.map((e) => e.date));
-  const eventsForSelected = mockEvents.filter((e) => e.date === selectedDate);
   const weekDates = getWeekDates(selectedDate);
+
+  // Union of dates that have a calendar event OR a task due — used for the
+  // small dot indicators in Month/Week views.
+  const markedDates = useMemo(() => {
+    const set = new Set(events.map((e) => e.eventDate));
+    tasks.forEach((task) => {
+      if (task.dueDate) set.add(task.dueDate);
+    });
+    return set;
+  }, [events, tasks]);
+
+  const agendaItems = useMemo<AgendaItem[]>(() => {
+    const eventItems: AgendaItem[] = events
+      .filter((event) => event.eventDate === selectedDate)
+      .map((event) => ({
+        kind: 'event' as const,
+        event,
+        sortKey: event.allDay || !event.startTime ? -1 : toMinutes(event.startTime),
+      }));
+
+    const taskItems: AgendaItem[] = tasks
+      .filter((task) => task.dueDate === selectedDate)
+      .map((task) => ({
+        kind: 'task' as const,
+        task,
+        sortKey: task.dueTime ? toMinutes(task.dueTime) : 24 * 60,
+      }));
+
+    return [...eventItems, ...taskItems].sort((a, b) => a.sortKey - b.sortKey);
+  }, [events, tasks, selectedDate]);
 
   const agendaLabel = new Intl.DateTimeFormat('en-US', {
     weekday: 'long',
     month: 'short',
     day: 'numeric',
   }).format(parseISODate(selectedDate));
+
+  function openAdd() {
+    setEditingEvent(null);
+    setSheetOpen(true);
+  }
+
+  function openEdit(event: CalendarEvent) {
+    setEditingEvent(event);
+    setSheetOpen(true);
+  }
+
+  function closeSheet() {
+    setSheetOpen(false);
+    setEditingEvent(null);
+  }
 
   return (
     <>
@@ -65,6 +129,8 @@ export default function CalendarPage() {
           ))}
         </div>
 
+        {eventsError && <p className="calendar-error-banner">{eventsError}</p>}
+
         {view === 'month' && (
           <Card padding="md">
             <p className="calendar-month-label">
@@ -80,9 +146,9 @@ export default function CalendarPage() {
             <div className="calendar-grid">
               {cells.map((day, i) => {
                 const iso = day ? isoForDay(referenceMonth, day) : null;
-                const isToday = iso === APP_TODAY_ISO;
+                const isToday = iso === TODAY_ISO;
                 const isSelected = iso === selectedDate;
-                const hasEvent = iso && eventDates.has(iso);
+                const hasEvent = iso && markedDates.has(iso);
                 return (
                   <button
                     key={i}
@@ -106,9 +172,9 @@ export default function CalendarPage() {
             <div className="calendar-week-strip">
               {weekDates.map((iso) => {
                 const date = parseISODate(iso);
-                const isToday = iso === APP_TODAY_ISO;
+                const isToday = iso === TODAY_ISO;
                 const isSelected = iso === selectedDate;
-                const hasEvent = eventDates.has(iso);
+                const hasEvent = markedDates.has(iso);
                 return (
                   <button
                     key={iso}
@@ -158,26 +224,76 @@ export default function CalendarPage() {
         <div>
           <p className="calendar-section-label">{agendaLabel}</p>
           <Card padding="md">
-            {eventsForSelected.length === 0 ? (
+            {eventsLoading ? (
+              <p className="calendar-loading">Loading your calendar…</p>
+            ) : agendaItems.length === 0 ? (
               <EmptyState title={t.calendar.noEvents} subtitle={t.calendar.noEventsSubtitle} />
             ) : (
-              eventsForSelected.map((event) => (
-                <div key={event.id} className="calendar-event-row">
-                  <div className="calendar-event-row__time">{event.startTime}</div>
-                  <div className="calendar-event-row__line" />
-                  <div className="calendar-event-row__body">
-                    <p className="calendar-event-row__title">{event.title}</p>
-                    {event.location && <p className="calendar-event-row__meta">{event.location}</p>}
+              agendaItems.map((item) =>
+                item.kind === 'event' ? (
+                  <button
+                    key={`event-${item.event.id}`}
+                    className="calendar-event-row calendar-event-row--clickable"
+                    onClick={() => openEdit(item.event)}
+                  >
+                    <div className="calendar-event-row__time">
+                      {item.event.allDay ? 'All day' : item.event.startTime ?? ''}
+                    </div>
+                    <div className="calendar-event-row__line" />
+                    <div className="calendar-event-row__body">
+                      <p className="calendar-event-row__title">{item.event.title}</p>
+                      {item.event.location && (
+                        <p className="calendar-event-row__meta">{item.event.location}</p>
+                      )}
+                    </div>
+                    <Badge tone={item.event.eventType === 'meeting' ? 'success' : 'neutral'}>
+                      {item.event.eventType === 'meeting' ? 'Meeting' : 'Event'}
+                    </Badge>
+                  </button>
+                ) : (
+                  <div key={`task-${item.task.id}`} className="calendar-event-row">
+                    <div className="calendar-event-row__time">{item.task.dueTime ?? ''}</div>
+                    <div className="calendar-event-row__line" />
+                    <div className="calendar-event-row__body">
+                      <p className="calendar-event-row__title">{item.task.title}</p>
+                    </div>
+                    <Badge tone="primary">Task</Badge>
                   </div>
-                  <Badge tone={event.type === 'task' ? 'primary' : 'neutral'}>
-                    {event.type === 'task' ? 'Task' : 'Event'}
-                  </Badge>
-                </div>
-              ))
+                ),
+              )
             )}
           </Card>
         </div>
       </div>
+
+      <IconButton aria-label="Add event" className="calendar-fab" onClick={openAdd}>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <path d="M12 5v14M5 12h14" stroke="white" strokeWidth="2.2" strokeLinecap="round" />
+        </svg>
+      </IconButton>
+
+      <AddEventSheet
+        open={sheetOpen}
+        event={editingEvent}
+        defaultDate={selectedDate}
+        onClose={closeSheet}
+        onSave={async (input) => {
+          if (editingEvent) {
+            await updateEvent(editingEvent.id, input);
+          } else {
+            await addEvent(input);
+          }
+          closeSheet();
+        }}
+        onDelete={
+          editingEvent
+            ? async () => {
+                await deleteEvent(editingEvent.id);
+                closeSheet();
+              }
+            : undefined
+        }
+      />
     </>
   );
 }
