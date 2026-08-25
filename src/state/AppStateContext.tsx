@@ -92,6 +92,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         if (!cancelled) setTasks(loaded);
       })
       .catch((err: Error) => {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] fetchTasks failed', err);
         if (!cancelled) setTasksError(err.message || 'Could not load tasks.');
       })
       .finally(() => {
@@ -110,6 +112,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         const created = await tasksApi.createTask(userId, input);
         setTasks((prev) => [created, ...prev]);
       } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] addTask failed', err);
         setTasksError(err instanceof Error ? err.message : 'Could not create task.');
         throw err;
       }
@@ -123,6 +127,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       const updated = await tasksApi.updateTask(id, input);
       setTasks((prev) => prev.map((task) => (task.id === id ? updated : task)));
     } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[AppState] updateTask failed', err);
       setTasksError(err instanceof Error ? err.message : 'Could not update task.');
       throw err;
     }
@@ -143,6 +149,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         const updated = await tasksApi.setTaskStatus(id, nextStatus);
         setTasks((prev) => prev.map((task) => (task.id === id ? updated : task)));
       } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] toggleTask failed', err);
         // Roll back on failure.
         setTasks((prev) =>
           prev.map((task) => (task.id === id ? { ...task, status: current.status } : task)),
@@ -159,6 +167,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     try {
       await tasksApi.deleteTask(id);
     } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[AppState] deleteTask failed', err);
       setTasks(previous);
       setTasksError(err instanceof Error ? err.message : 'Could not delete task.');
       throw err;
