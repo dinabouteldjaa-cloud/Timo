@@ -6,17 +6,22 @@ import EmptyState from '../../components/ui/EmptyState';
 import IconButton from '../../components/ui/IconButton';
 import { useLocale } from '../../i18n/LocaleContext';
 import { useAppState } from '../../state/AppStateContext';
-import { APP_TODAY_ISO } from '../../data/mockData';
+import type { Task } from '../../types/task';
 import AddTaskSheet from './AddTaskSheet';
 import './TasksPage.css';
 
 type Filter = 'all' | 'today' | 'upcoming' | 'completed';
 
+// "Today" for filtering purposes — real device date, now that tasks are real.
+const todayISO = new Date().toISOString().slice(0, 10);
+
 export default function TasksPage() {
   const { t } = useLocale();
-  const { tasks, toggleTask, addTask } = useAppState();
+  const { tasks, tasksLoading, tasksError, toggleTask, addTask, updateTask, deleteTask } =
+    useAppState();
   const [filter, setFilter] = useState<Filter>('all');
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
 
   const filters: { key: Filter; label: string }[] = [
     { key: 'all', label: t.tasks.filterAll },
@@ -27,12 +32,27 @@ export default function TasksPage() {
 
   const filtered = tasks.filter((task) => {
     if (filter === 'completed') return task.status === 'completed';
-    if (filter === 'today') return task.status !== 'completed' && task.dueDate === APP_TODAY_ISO;
+    if (filter === 'today') return task.status !== 'completed' && task.dueDate === todayISO;
     if (filter === 'upcoming') {
-      return task.status !== 'completed' && (!task.dueDate || task.dueDate > APP_TODAY_ISO);
+      return task.status !== 'completed' && (!task.dueDate || task.dueDate > todayISO);
     }
     return true;
   });
+
+  function openAdd() {
+    setEditingTask(null);
+    setSheetOpen(true);
+  }
+
+  function openEdit(task: Task) {
+    setEditingTask(task);
+    setSheetOpen(true);
+  }
+
+  function closeSheet() {
+    setSheetOpen(false);
+    setEditingTask(null);
+  }
 
   return (
     <>
@@ -51,20 +71,22 @@ export default function TasksPage() {
           ))}
         </div>
 
+        {tasksError && <p className="tasks-error-banner">{tasksError}</p>}
+
         <Card padding="md">
-          {filtered.length === 0 ? (
+          {tasksLoading ? (
+            <p className="tasks-loading">Loading your tasks…</p>
+          ) : filtered.length === 0 ? (
             <EmptyState title={t.tasks.emptyTitle} subtitle={t.tasks.emptySubtitle} />
           ) : (
-            filtered.map((task) => <TaskRow key={task.id} task={task} onToggle={toggleTask} />)
+            filtered.map((task) => (
+              <TaskRow key={task.id} task={task} onToggle={toggleTask} onOpen={openEdit} />
+            ))
           )}
         </Card>
       </div>
 
-      <IconButton
-        aria-label={t.tasks.addTask}
-        className="tasks-fab"
-        onClick={() => setSheetOpen(true)}
-      >
+      <IconButton aria-label={t.tasks.addTask} className="tasks-fab" onClick={openAdd}>
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
           <path d="M12 5v14M5 12h14" stroke="white" strokeWidth="2.2" strokeLinecap="round" />
         </svg>
@@ -72,11 +94,24 @@ export default function TasksPage() {
 
       <AddTaskSheet
         open={sheetOpen}
-        onClose={() => setSheetOpen(false)}
-        onSave={(input) => {
-          addTask(input);
-          setSheetOpen(false);
+        task={editingTask}
+        onClose={closeSheet}
+        onSave={async (input) => {
+          if (editingTask) {
+            await updateTask(editingTask.id, input);
+          } else {
+            await addTask(input);
+          }
+          closeSheet();
         }}
+        onDelete={
+          editingTask
+            ? async () => {
+                await deleteTask(editingTask.id);
+                closeSheet();
+              }
+            : undefined
+        }
       />
     </>
   );

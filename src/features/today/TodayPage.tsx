@@ -16,7 +16,7 @@ import './TodayPage.css';
 export default function TodayPage() {
   const { t, locale } = useLocale();
   const navigate = useNavigate();
-  const { tasks, toggleTask, addTask } = useAppState();
+  const { tasks, tasksLoading, toggleTask, addTask } = useAppState();
   const [quickAddOpen, setQuickAddOpen] = useState(false);
 
   const greeting = t.today[getGreetingKey()];
@@ -100,7 +100,9 @@ export default function TodayPage() {
             </button>
           </div>
           <Card padding="md">
-            {todaysTasks.length === 0 ? (
+            {tasksLoading ? (
+              <p className="today-empty">Loading your tasks…</p>
+            ) : todaysTasks.length === 0 ? (
               <p className="today-empty">{t.today.noTasksToday}</p>
             ) : (
               todaysTasks.map((task) => (
@@ -120,8 +122,8 @@ export default function TodayPage() {
       <AddTaskSheet
         open={quickAddOpen}
         onClose={() => setQuickAddOpen(false)}
-        onSave={(input) => {
-          addTask(input);
+        onSave={async (input) => {
+          await addTask(input);
           setQuickAddOpen(false);
         }}
       />

@@ -1,20 +1,22 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Button from '../../components/ui/Button';
 import { useLocale } from '../../i18n/LocaleContext';
 import type { NewTaskInput } from '../../state/AppStateContext';
-import type { TaskCategory, TaskPriority } from '../../types/task';
+import type { Task, TaskCategory, TaskPriority } from '../../types/task';
 import './AddTaskSheet.css';
 
 interface AddTaskSheetProps {
   open: boolean;
+  task?: Task | null;
   onClose: () => void;
-  onSave: (input: NewTaskInput) => void;
+  onSave: (input: NewTaskInput) => void | Promise<void>;
+  onDelete?: () => void | Promise<void>;
 }
 
 const priorities: TaskPriority[] = ['low', 'medium', 'high'];
 const categories: TaskCategory[] = ['work', 'personal', 'health', 'errands', 'learning', 'other'];
 
-const initialState = {
+const emptyForm = {
   title: '',
   description: '',
   date: '',
@@ -24,37 +26,70 @@ const initialState = {
   duration: '',
 };
 
-export default function AddTaskSheet({ open, onClose, onSave }: AddTaskSheetProps) {
+function formFromTask(task: Task) {
+  return {
+    title: task.title,
+    description: task.description ?? '',
+    date: task.dueDate ?? '',
+    time: task.dueTime ?? '',
+    priority: task.priority,
+    category: task.category,
+    duration: task.estimatedMinutes ? String(task.estimatedMinutes) : '',
+  };
+}
+
+export default function AddTaskSheet({ open, task, onClose, onSave, onDelete }: AddTaskSheetProps) {
   const { t } = useLocale();
-  const [form, setForm] = useState(initialState);
+  const [form, setForm] = useState(task ? formFromTask(task) : emptyForm);
   const [titleTouched, setTitleTouched] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const isEditing = Boolean(task);
+
+  useEffect(() => {
+    if (open) {
+      setForm(task ? formFromTask(task) : emptyForm);
+      setTitleTouched(false);
+      setSaving(false);
+    }
+  }, [open, task]);
 
   if (!open) return null;
 
   const titleError = titleTouched && form.title.trim().length === 0;
 
   function handleClose() {
-    setForm(initialState);
-    setTitleTouched(false);
     onClose();
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (form.title.trim().length === 0) {
       setTitleTouched(true);
       return;
     }
-    onSave({
-      title: form.title,
-      description: form.description || undefined,
-      dueDate: form.date || undefined,
-      dueTime: form.time || undefined,
-      priority: form.priority,
-      category: form.category,
-      estimatedMinutes: form.duration ? Number(form.duration) : undefined,
-    });
-    setForm(initialState);
-    setTitleTouched(false);
+    setSaving(true);
+    try {
+      await onSave({
+        title: form.title,
+        description: form.description || undefined,
+        dueDate: form.date || undefined,
+        dueTime: form.time || undefined,
+        priority: form.priority,
+        category: form.category,
+        estimatedMinutes: form.duration ? Number(form.duration) : undefined,
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!onDelete) return;
+    setSaving(true);
+    try {
+      await onDelete();
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -64,7 +99,7 @@ export default function AddTaskSheet({ open, onClose, onSave }: AddTaskSheetProp
           <button className="add-task-sheet__close" onClick={handleClose} aria-label={t.common.close}>
             ✕
           </button>
-          <p className="add-task-sheet__title">{t.addTask.title}</p>
+          <p className="add-task-sheet__title">{isEditing ? 'Edit task' : t.addTask.title}</p>
           <div style={{ width: 34 }} />
         </div>
 
@@ -157,11 +192,17 @@ export default function AddTaskSheet({ open, onClose, onSave }: AddTaskSheetProp
               onChange={(e) => setForm((f) => ({ ...f, duration: e.target.value }))}
             />
           </label>
+
+          {isEditing && onDelete && (
+            <button type="button" className="add-task-delete" onClick={handleDelete} disabled={saving}>
+              Delete task
+            </button>
+          )}
         </div>
 
         <div className="add-task-sheet__footer">
-          <Button fullWidth size="lg" onClick={handleSave}>
-            {t.addTask.save}
+          <Button fullWidth size="lg" onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving…' : t.addTask.save}
           </Button>
         </div>
       </div>

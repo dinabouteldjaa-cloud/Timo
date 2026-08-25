@@ -152,3 +152,19 @@
   background: var(--color-primary-soft);
   color: var(--color-primary-dark);
 }
+
+.add-task-delete {
+  border: none;
+  background: none;
+  color: var(--color-error);
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: var(--space-2) 0;
+  text-align: center;
+}
+
+.add-task-delete:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

@@ -8,16 +8,22 @@ import './TaskRow.css';
 interface TaskRowProps {
   task: Task;
   onToggle?: (id: string) => void;
+  onOpen?: (task: Task) => void;
 }
 
-export default function TaskRow({ task, onToggle }: TaskRowProps) {
+export default function TaskRow({ task, onToggle, onOpen }: TaskRowProps) {
   const { t } = useLocale();
   const done = task.status === 'completed';
 
   return (
     <div className={`task-row ${done ? 'task-row--done' : ''}`}>
       <Checkbox checked={done} onChange={() => onToggle?.(task.id)} aria-label={task.title} />
-      <div className="task-row__body">
+      <div
+        className={`task-row__body ${onOpen ? 'task-row__body--clickable' : ''}`}
+        onClick={() => onOpen?.(task)}
+        role={onOpen ? 'button' : undefined}
+        tabIndex={onOpen ? 0 : undefined}
+      >
         <p className="task-row__title">{task.title}</p>
         <div className="task-row__meta">
           {task.dueTime && <span className="task-row__time">{task.dueTime}</span>}

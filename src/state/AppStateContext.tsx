@@ -9,15 +9,16 @@ import {
   type ReactNode,
 } from 'react';
 import type { Task, TaskCategory, TaskPriority } from '../types/task';
-import { mockTasks, focusSuggestion } from '../data/mockData';
+import { focusSuggestion } from '../data/mockData';
+import { useAuth } from './AuthContext';
+import * as tasksApi from '../lib/tasksApi';
 
 // ---------------------------------------------------------------------------
-// Shared, in-memory app state.
+// Shared app state.
 //
-// This is intentionally a single lightweight React context rather than a
-// state-management library — everything here is local-session only and is
-// reset on refresh. It exists purely to keep Today / Tasks / Focus in sync
-// during the UI-foundation stage, ahead of real Supabase-backed data.
+// Tasks are now backed by Supabase (see src/lib/tasksApi.ts) and scoped to
+// the signed-in user via RLS. The focus session/timer below is still purely
+// local/in-memory — focus session persistence is a later phase.
 // ---------------------------------------------------------------------------
 
 export interface NewTaskInput {
@@ -46,8 +47,12 @@ interface FocusStatsState {
 
 interface AppStateValue {
   tasks: Task[];
-  addTask: (input: NewTaskInput) => void;
-  toggleTask: (id: string) => void;
+  tasksLoading: boolean;
+  tasksError: string | null;
+  addTask: (input: NewTaskInput) => Promise<void>;
+  updateTask: (id: string, input: NewTaskInput) => Promise<void>;
+  toggleTask: (id: string) => Promise<void>;
+  deleteTask: (id: string) => Promise<void>;
 
   focusSession: FocusSessionState;
   focusStats: FocusStatsState;
@@ -64,34 +69,103 @@ const AppStateContext = createContext<AppStateValue | undefined>(undefined);
 const DEFAULT_DURATION = 25;
 
 export function AppStateProvider({ children }: { children: ReactNode }) {
-  const [tasks, setTasks] = useState<Task[]>(mockTasks);
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
 
-  const addTask = useCallback((input: NewTaskInput) => {
-    const newTask: Task = {
-      id: `t-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      title: input.title.trim(),
-      description: input.description?.trim() || undefined,
-      status: 'todo',
-      priority: input.priority,
-      category: input.category,
-      dueDate: input.dueDate || undefined,
-      dueTime: input.dueTime || undefined,
-      estimatedMinutes: input.estimatedMinutes,
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [tasksLoading, setTasksLoading] = useState(false);
+  const [tasksError, setTasksError] = useState<string | null>(null);
+
+  // Load tasks whenever the signed-in user changes (login/logout/switch).
+  useEffect(() => {
+    if (!userId) {
+      setTasks([]);
+      setTasksError(null);
+      return;
+    }
+    let cancelled = false;
+    setTasksLoading(true);
+    setTasksError(null);
+    tasksApi
+      .fetchTasks(userId)
+      .then((loaded) => {
+        if (!cancelled) setTasks(loaded);
+      })
+      .catch((err: Error) => {
+        if (!cancelled) setTasksError(err.message || 'Could not load tasks.');
+      })
+      .finally(() => {
+        if (!cancelled) setTasksLoading(false);
+      });
+    return () => {
+      cancelled = true;
     };
-    setTasks((prev) => [newTask, ...prev]);
+  }, [userId]);
+
+  const addTask = useCallback(
+    async (input: NewTaskInput) => {
+      if (!userId) return;
+      setTasksError(null);
+      try {
+        const created = await tasksApi.createTask(userId, input);
+        setTasks((prev) => [created, ...prev]);
+      } catch (err) {
+        setTasksError(err instanceof Error ? err.message : 'Could not create task.');
+        throw err;
+      }
+    },
+    [userId],
+  );
+
+  const updateTask = useCallback(async (id: string, input: NewTaskInput) => {
+    setTasksError(null);
+    try {
+      const updated = await tasksApi.updateTask(id, input);
+      setTasks((prev) => prev.map((task) => (task.id === id ? updated : task)));
+    } catch (err) {
+      setTasksError(err instanceof Error ? err.message : 'Could not update task.');
+      throw err;
+    }
   }, []);
 
-  const toggleTask = useCallback((id: string) => {
-    setTasks((prev) =>
-      prev.map((task) =>
-        task.id === id
-          ? { ...task, status: task.status === 'completed' ? 'todo' : 'completed' }
-          : task,
-      ),
-    );
-  }, []);
+  const toggleTask = useCallback(
+    async (id: string) => {
+      const current = tasks.find((task) => task.id === id);
+      if (!current) return;
+      const nextStatus = current.status === 'completed' ? 'todo' : 'completed';
 
-  // --- Focus session -------------------------------------------------
+      // Optimistic update so checkboxes feel instant.
+      setTasks((prev) =>
+        prev.map((task) => (task.id === id ? { ...task, status: nextStatus } : task)),
+      );
+
+      try {
+        const updated = await tasksApi.setTaskStatus(id, nextStatus);
+        setTasks((prev) => prev.map((task) => (task.id === id ? updated : task)));
+      } catch (err) {
+        // Roll back on failure.
+        setTasks((prev) =>
+          prev.map((task) => (task.id === id ? { ...task, status: current.status } : task)),
+        );
+        setTasksError(err instanceof Error ? err.message : 'Could not update task.');
+      }
+    },
+    [tasks],
+  );
+
+  const deleteTask = useCallback(async (id: string) => {
+    const previous = tasks;
+    setTasks((prev) => prev.filter((task) => task.id !== id));
+    try {
+      await tasksApi.deleteTask(id);
+    } catch (err) {
+      setTasks(previous);
+      setTasksError(err instanceof Error ? err.message : 'Could not delete task.');
+      throw err;
+    }
+  }, [tasks]);
+
+  // --- Focus session (local-only, unchanged from previous phase) ------
   const [focusSession, setFocusSession] = useState<FocusSessionState>({
     status: 'idle',
     durationMinutes: DEFAULT_DURATION,
@@ -197,8 +271,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppStateValue>(
     () => ({
       tasks,
+      tasksLoading,
+      tasksError,
       addTask,
+      updateTask,
       toggleTask,
+      deleteTask,
       focusSession,
       focusStats,
       selectFocusTask,
@@ -210,8 +288,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     }),
     [
       tasks,
+      tasksLoading,
+      tasksError,
       addTask,
+      updateTask,
       toggleTask,
+      deleteTask,
       focusSession,
       focusStats,
       selectFocusTask,

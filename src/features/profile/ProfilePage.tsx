@@ -1,12 +1,13 @@
 import { useNavigate } from 'react-router-dom';
 import Header from '../../components/layout/Header';
 import Card from '../../components/ui/Card';
+import Button from '../../components/ui/Button';
 import TimoAvatar from '../../components/avatar/TimoAvatar';
 import Badge from '../../components/ui/Badge';
+import { useAuth } from '../../state/AuthContext';
 import './ProfilePage.css';
 
 const rows = [
-  { label: 'Account', hint: 'Coming soon' },
   { label: 'Notifications', hint: 'Coming soon' },
   { label: 'Preferences', hint: 'Coming soon' },
   { label: 'Language', hint: 'English' },
@@ -15,6 +16,15 @@ const rows = [
 
 export default function ProfilePage() {
   const navigate = useNavigate();
+  const { user, signOut } = useAuth();
+
+  const displayName =
+    (user?.user_metadata?.display_name as string | undefined) || user?.email?.split('@')[0] || 'You';
+
+  async function handleLogout() {
+    await signOut();
+    navigate('/login', { replace: true });
+  }
 
   return (
     <>
@@ -24,8 +34,8 @@ export default function ProfilePage() {
         <Card padding="lg" className="profile-hero">
           <TimoAvatar state="resting" size="lg" />
           <div>
-            <p className="profile-hero__name">You</p>
-            <p className="profile-hero__sub">Signed-in account coming soon</p>
+            <p className="profile-hero__name">{displayName}</p>
+            <p className="profile-hero__sub">{user?.email}</p>
           </div>
         </Card>
 
@@ -38,9 +48,9 @@ export default function ProfilePage() {
           ))}
         </Card>
 
-        <p className="profile-note">
-          Account, authentication and preferences will be connected once Supabase is introduced.
-        </p>
+        <Button variant="danger" fullWidth size="lg" onClick={handleLogout}>
+          Log out
+        </Button>
       </div>
     </>
   );
