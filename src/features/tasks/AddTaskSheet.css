@@ -108,6 +108,16 @@
   outline: none;
 }
 
+.add-task-input--error {
+  border-color: var(--color-error);
+}
+
+.add-task-field__error {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-error);
+}
+
 .add-task-textarea {
   resize: none;
   min-height: 80px;

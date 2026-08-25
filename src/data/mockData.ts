@@ -11,6 +11,14 @@
 
 import type { CalendarEvent, Task } from '../types/task';
 
+/**
+ * Fixed reference "today" used throughout the mock data and calendar so the
+ * demo content (dates, filters, agenda) stays internally consistent without
+ * depending on the real device clock. Replace with a real date source once
+ * live data is connected.
+ */
+export const APP_TODAY_ISO = '2026-08-24';
+
 export const mockTasks: Task[] = [
   {
     id: 't1',
@@ -18,6 +26,7 @@ export const mockTasks: Task[] = [
     status: 'todo',
     priority: 'high',
     category: 'work',
+    dueDate: APP_TODAY_ISO,
     dueTime: '09:30',
     estimatedMinutes: 20,
   },
@@ -27,6 +36,7 @@ export const mockTasks: Task[] = [
     status: 'in_progress',
     priority: 'high',
     category: 'work',
+    dueDate: APP_TODAY_ISO,
     dueTime: '14:00',
     estimatedMinutes: 90,
   },
@@ -36,6 +46,7 @@ export const mockTasks: Task[] = [
     status: 'todo',
     priority: 'low',
     category: 'errands',
+    dueDate: APP_TODAY_ISO,
     dueTime: '18:30',
     estimatedMinutes: 30,
   },
@@ -45,6 +56,7 @@ export const mockTasks: Task[] = [
     status: 'todo',
     priority: 'medium',
     category: 'health',
+    dueDate: '2026-08-27',
     estimatedMinutes: 10,
   },
   {

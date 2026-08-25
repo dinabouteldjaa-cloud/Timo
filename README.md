@@ -5,10 +5,10 @@ time-management sibling to Auron's purple health & fitness product.
 
 > Tell Timo what you need to do. Timo helps figure out when you should do it.
 
-This repository currently contains the **UI foundation** stage only:
-mobile-first app shell, design system, and static/mock-data screens for
-Today, Tasks, Calendar, and Focus. No backend, auth, or AI features are
-wired up yet — see `PENDING` below.
+This repository currently contains the **UI foundation + local interactivity**
+stage: mobile-first app shell, design system, and the Today, Tasks, Calendar,
+Focus, and Profile screens are wired up with shared React state (no backend
+yet). See `PENDING` below for what's still out of scope.
 
 ## Tech stack
 
@@ -58,9 +58,10 @@ src/
 
 ## Pending
 
-- Supabase (auth, tasks, calendar, focus sessions) not yet connected
-- Add Task sheet is UI-only (does not persist)
-- Calendar Week/Day views are placeholders
-- Focus timer is static (no running clock yet)
-- Locale switcher not built (English-only for now)
-- AI features (Brain Dump, Plan My Day, replanning, insights) not started
+- Supabase (auth, tasks, calendar, focus sessions) not yet connected — all
+  state below lives in React context (`src/state/AppStateContext.tsx`) and
+  resets on refresh
+- Locale switcher not built (English-only for now; French dictionary exists)
+- AI features (Brain Dump, Plan My Day, replanning, insights) not started —
+  "Plan my day" is intentionally disabled with a "Coming soon" label
+- Profile/Settings is a temporary placeholder screen (no real account data)

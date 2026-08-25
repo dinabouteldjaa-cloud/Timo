@@ -5,7 +5,8 @@ import TaskRow from '../../components/ui/TaskRow';
 import EmptyState from '../../components/ui/EmptyState';
 import IconButton from '../../components/ui/IconButton';
 import { useLocale } from '../../i18n/LocaleContext';
-import { mockTasks } from '../../data/mockData';
+import { useAppState } from '../../state/AppStateContext';
+import { APP_TODAY_ISO } from '../../data/mockData';
 import AddTaskSheet from './AddTaskSheet';
 import './TasksPage.css';
 
@@ -13,7 +14,7 @@ type Filter = 'all' | 'today' | 'upcoming' | 'completed';
 
 export default function TasksPage() {
   const { t } = useLocale();
-  const [tasks, setTasks] = useState(mockTasks);
+  const { tasks, toggleTask, addTask } = useAppState();
   const [filter, setFilter] = useState<Filter>('all');
   const [sheetOpen, setSheetOpen] = useState(false);
 
@@ -26,20 +27,12 @@ export default function TasksPage() {
 
   const filtered = tasks.filter((task) => {
     if (filter === 'completed') return task.status === 'completed';
-    if (filter === 'today') return task.status !== 'completed' && !!task.dueTime;
-    if (filter === 'upcoming') return task.status !== 'completed' && !task.dueTime;
+    if (filter === 'today') return task.status !== 'completed' && task.dueDate === APP_TODAY_ISO;
+    if (filter === 'upcoming') {
+      return task.status !== 'completed' && (!task.dueDate || task.dueDate > APP_TODAY_ISO);
+    }
     return true;
   });
-
-  function toggleTask(id: string) {
-    setTasks((prev) =>
-      prev.map((task) =>
-        task.id === id
-          ? { ...task, status: task.status === 'completed' ? 'todo' : 'completed' }
-          : task,
-      ),
-    );
-  }
 
   return (
     <>
@@ -77,7 +70,14 @@ export default function TasksPage() {
         </svg>
       </IconButton>
 
-      <AddTaskSheet open={sheetOpen} onClose={() => setSheetOpen(false)} />
+      <AddTaskSheet
+        open={sheetOpen}
+        onClose={() => setSheetOpen(false)}
+        onSave={(input) => {
+          addTask(input);
+          setSheetOpen(false);
+        }}
+      />
     </>
   );
 }
