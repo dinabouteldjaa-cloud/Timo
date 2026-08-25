@@ -1,7 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import Header from '../../components/layout/Header';
 import Card from '../../components/ui/Card';
-import Button from '../../components/ui/Button';
 import TimoAvatar from '../../components/avatar/TimoAvatar';
 import Badge from '../../components/ui/Badge';
 import { useAuth } from '../../state/AuthContext';
@@ -48,9 +47,25 @@ export default function ProfilePage() {
           ))}
         </Card>
 
-        <Button variant="danger" fullWidth size="lg" onClick={handleLogout}>
-          Log out
-        </Button>
+        <div>
+          <p className="profile-section-label">Account</p>
+          <Card padding="none">
+            <button type="button" className="profile-logout-row" onClick={handleLogout}>
+              <span className="profile-logout-row__icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M9 4H6a2 2 0 00-2 2v12a2 2 0 002 2h3M16 16l4-4-4-4M20 12H9"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </span>
+              <span className="profile-logout-row__label">Log out</span>
+            </button>
+          </Card>
+        </div>
       </div>
     </>
   );

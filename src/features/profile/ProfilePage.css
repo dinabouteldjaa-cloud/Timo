@@ -46,3 +46,44 @@
   margin: 0;
   padding: 0 var(--space-4);
 }
+
+.profile-section-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin: 0 0 var(--space-2);
+}
+
+.profile-logout-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: var(--space-4) var(--space-5);
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--color-error);
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.profile-logout-row:active {
+  background: var(--color-error-soft);
+}
+
+.profile-logout-row__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--color-error-soft);
+  color: var(--color-error);
+  flex-shrink: 0;
+}
