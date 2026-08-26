@@ -26,7 +26,7 @@ const fr: Strings = {
     upNext: 'À suivre',
     todaysTasks: "Tâches du jour",
     seeAll: 'Tout voir',
-    focusAvailable: '{minutes} min de focus disponibles {reason}',
+    focusAvailable: 'Prêt pour une session de focus ?',
     startFocus: 'Démarrer le focus',
     quickAdd: 'Ajouter rapidement une tâche…',
     noTasksToday: 'Rien de prévu pour l’instant',

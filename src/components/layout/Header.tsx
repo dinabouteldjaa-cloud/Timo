@@ -7,13 +7,22 @@ interface HeaderProps {
   title?: ReactNode;
   subtitle?: ReactNode;
   onProfileClick?: () => void;
+  /** When provided, shows a leading back button instead of the default layout. */
+  onBack?: () => void;
 }
 
-export default function Header({ title, subtitle, onProfileClick }: HeaderProps) {
+export default function Header({ title, subtitle, onProfileClick, onBack }: HeaderProps) {
   const navigate = useNavigate();
 
   return (
     <header className="app-header">
+      {onBack && (
+        <IconButton aria-label="Back" onClick={onBack} className="app-header__back">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+            <path d="M15 5l-7 7 7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </IconButton>
+      )}
       <div className="app-header__text">
         {title && <div className="app-header__title">{title}</div>}
         {subtitle && <div className="app-header__subtitle">{subtitle}</div>}

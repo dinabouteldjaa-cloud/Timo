@@ -9,7 +9,6 @@ import {
   type ReactNode,
 } from 'react';
 import type { CalendarEvent, CalendarEventType, Reminder, Task, TaskCategory, TaskPriority } from '../types/task';
-import { focusSuggestion } from '../data/mockData';
 import { toISODate } from '../lib/utils';
 import { useAuth } from './AuthContext';
 import * as tasksApi from '../lib/tasksApi';
@@ -596,7 +595,3 @@ export function useAppState() {
   if (!ctx) throw new Error('useAppState must be used within AppStateProvider');
   return ctx;
 }
-
-// Re-exported so screens that only need the static suggestion copy don't
-// need to import mockData directly.
-export { focusSuggestion };

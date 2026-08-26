@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import Header from '../../components/layout/Header';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
@@ -9,6 +10,7 @@ const durations = [15, 25, 45, 60];
 
 export default function FocusPage() {
   const { t } = useLocale();
+  const navigate = useNavigate();
   const {
     tasks,
     focusSession,
@@ -34,9 +36,27 @@ export default function FocusPage() {
   const isCompleted = focusSession.status === 'completed';
   const isActive = isRunning || isPaused;
 
+  // A running/paused session is preserved in shared app state, so leaving
+  // via the back button (or any other navigation) doesn't destroy it — the
+  // countdown keeps ticking and picks up right where it left off if the
+  // user returns to /focus.
+  function handleBack() {
+    navigate('/');
+  }
+
+  function handleEnd() {
+    endFocus();
+    navigate('/');
+  }
+
+  function handleDone() {
+    endFocus();
+    navigate('/');
+  }
+
   return (
     <>
-      <Header title={t.focus.title} />
+      <Header title={t.focus.title} onBack={handleBack} />
 
       <div className="focus-page">
         <Card padding="lg" className="focus-timer-card">
@@ -90,7 +110,7 @@ export default function FocusPage() {
               <Button variant="secondary" fullWidth onClick={pauseFocus}>
                 {t.focus.pause}
               </Button>
-              <Button variant="danger" fullWidth onClick={endFocus}>
+              <Button variant="danger" fullWidth onClick={handleEnd}>
                 End session
               </Button>
             </div>
@@ -101,15 +121,15 @@ export default function FocusPage() {
               <Button fullWidth onClick={resumeFocus}>
                 {t.focus.resume}
               </Button>
-              <Button variant="danger" fullWidth onClick={endFocus}>
+              <Button variant="danger" fullWidth onClick={handleEnd}>
                 End session
               </Button>
             </div>
           )}
 
           {isCompleted && (
-            <Button fullWidth size="lg" onClick={endFocus}>
-              Done
+            <Button fullWidth size="lg" onClick={handleDone}>
+              Done — back to Today
             </Button>
           )}
         </Card>

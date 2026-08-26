@@ -8,7 +8,6 @@ import TaskRow from '../../components/ui/TaskRow';
 import TimoAvatar from '../../components/avatar/TimoAvatar';
 import { useLocale, formatString } from '../../i18n/LocaleContext';
 import { getGreetingKey, formatFriendlyDate } from '../../lib/utils';
-import { focusSuggestion } from '../../data/mockData';
 import { useAppState } from '../../state/AppStateContext';
 import AddTaskSheet from '../tasks/AddTaskSheet';
 import './TodayPage.css';
@@ -16,8 +15,16 @@ import './TodayPage.css';
 export default function TodayPage() {
   const { t, locale } = useLocale();
   const navigate = useNavigate();
-  const { tasks, tasksLoading, toggleTask, addTask, eventsLoading, upcomingEvent, reminders } =
-    useAppState();
+  const {
+    tasks,
+    tasksLoading,
+    toggleTask,
+    addTask,
+    eventsLoading,
+    upcomingEvent,
+    reminders,
+    focusSession,
+  } = useAppState();
   const [quickAddOpen, setQuickAddOpen] = useState(false);
 
   const greeting = t.today[getGreetingKey()];
@@ -89,14 +96,15 @@ export default function TodayPage() {
           <div className="today-focus-card__row">
             <div>
               <p className="today-section-label">
-                {formatString(t.today.focusAvailable, {
-                  minutes: focusSuggestion.availableMinutes,
-                  reason: focusSuggestion.reason,
-                })}
+                {focusSession.status === 'running' || focusSession.status === 'paused'
+                  ? 'Focus session in progress'
+                  : t.today.focusAvailable}
               </p>
             </div>
             <Button variant="secondary" size="sm" onClick={() => navigate('/focus')}>
-              {t.today.startFocus}
+              {focusSession.status === 'running' || focusSession.status === 'paused'
+                ? 'Resume'
+                : t.today.startFocus}
             </Button>
           </div>
         </Card>

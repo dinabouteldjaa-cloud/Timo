@@ -6,6 +6,15 @@
   gap: var(--space-4);
 }
 
+.app-header__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.app-header__back {
+  flex-shrink: 0;
+}
+
 .app-header__title {
   font-size: 22px;
   font-weight: 800;

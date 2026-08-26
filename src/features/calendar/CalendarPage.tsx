@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Header from '../../components/layout/Header';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
@@ -52,6 +53,7 @@ function toMinutes(time: string): number {
 
 export default function CalendarPage() {
   const { t } = useLocale();
+  const navigate = useNavigate();
   const {
     events,
     eventsLoading,
@@ -63,6 +65,7 @@ export default function CalendarPage() {
     updateTask,
     deleteTask,
     reminders,
+    selectFocusTask,
   } = useAppState();
 
   const [view, setView] = useState<View>('month');
@@ -154,6 +157,13 @@ export default function CalendarPage() {
     setEditingTask(detailsTask);
     setDetailsTask(null);
     setTaskSheetOpen(true);
+  }
+
+  function startFocusFromDetails() {
+    if (!detailsTask) return;
+    selectFocusTask(detailsTask.id);
+    setDetailsTask(null);
+    navigate('/focus');
   }
 
   function closeTaskSheet() {
@@ -443,6 +453,7 @@ export default function CalendarPage() {
         reminder={detailsTask ? reminders.find((r) => r.taskId === detailsTask.id) ?? null : null}
         onClose={closeTaskDetails}
         onEdit={editTaskFromDetails}
+        onStartFocus={startFocusFromDetails}
         onDelete={async () => {
           if (!detailsTask) return;
           await deleteTask(detailsTask.id);

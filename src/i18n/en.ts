@@ -24,7 +24,7 @@ const en = {
     upNext: 'Up next',
     todaysTasks: "Today's tasks",
     seeAll: 'See all',
-    focusAvailable: '{minutes} min focus available {reason}',
+    focusAvailable: 'Ready for a focus session?',
     startFocus: 'Start focus',
     quickAdd: 'Quick add a task…',
     noTasksToday: 'Nothing scheduled yet',
