@@ -78,19 +78,28 @@ export default function ReminderPicker({
       )}
 
       {value.preset === 'custom' && (
-        <div className="reminder-picker__custom-row">
-          <input
-            className="reminder-picker__input"
-            type="date"
-            value={value.customDate}
-            onChange={(e) => onChange({ ...value, customDate: e.target.value })}
-          />
-          <input
-            className="reminder-picker__input"
-            type="time"
-            value={value.customTime}
-            onChange={(e) => onChange({ ...value, customTime: e.target.value })}
-          />
+        <div className="reminder-picker__custom">
+          <p className="reminder-picker__custom-intro">Choose when you want to be reminded</p>
+          <div className="reminder-picker__custom-row">
+            <label className="reminder-picker__custom-field">
+              <span className="reminder-picker__custom-label">Date</span>
+              <input
+                className="reminder-picker__input"
+                type="date"
+                value={value.customDate}
+                onChange={(e) => onChange({ ...value, customDate: e.target.value })}
+              />
+            </label>
+            <label className="reminder-picker__custom-field">
+              <span className="reminder-picker__custom-label">Time</span>
+              <input
+                className="reminder-picker__input"
+                type="time"
+                value={value.customTime}
+                onChange={(e) => onChange({ ...value, customTime: e.target.value })}
+              />
+            </label>
+          </div>
         </div>
       )}
 
