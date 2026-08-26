@@ -1,13 +1,21 @@
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from '../../components/layout/Header';
 import Card from '../../components/ui/Card';
+import Button from '../../components/ui/Button';
 import TimoAvatar from '../../components/avatar/TimoAvatar';
 import Badge from '../../components/ui/Badge';
 import { useAuth } from '../../state/AuthContext';
+import {
+  getPushSupportState,
+  isEnabledOnThisDevice,
+  enablePushNotifications,
+  disablePushNotifications,
+  type PushSupportState,
+} from '../../lib/pushNotifications';
 import './ProfilePage.css';
 
 const rows = [
-  { label: 'Notifications', hint: 'Coming soon' },
   { label: 'Preferences', hint: 'Coming soon' },
   { label: 'Language', hint: 'English' },
   { label: 'About Timo', hint: 'v0.1' },
@@ -17,12 +25,69 @@ export default function ProfilePage() {
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
 
+  const [support, setSupport] = useState<PushSupportState>('unsupported');
+  const [enabledHere, setEnabledHere] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [notifError, setNotifError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSupport(getPushSupportState());
+    isEnabledOnThisDevice().then(setEnabledHere);
+  }, []);
+
   const displayName =
     (user?.user_metadata?.display_name as string | undefined) || user?.email?.split('@')[0] || 'You';
 
   async function handleLogout() {
     await signOut();
     navigate('/login', { replace: true });
+  }
+
+  async function handleEnableNotifications() {
+    if (!user) return;
+    setBusy(true);
+    setNotifError(null);
+    const result = await enablePushNotifications(user.id);
+    setBusy(false);
+    setSupport(getPushSupportState());
+    if (result.ok) {
+      setEnabledHere(true);
+    } else {
+      setNotifError(result.error ?? 'Could not enable notifications.');
+    }
+  }
+
+  async function handleDisableNotifications() {
+    setBusy(true);
+    setNotifError(null);
+    const result = await disablePushNotifications();
+    setBusy(false);
+    if (result.ok) {
+      setEnabledHere(false);
+    } else {
+      setNotifError(result.error ?? 'Could not turn off notifications.');
+    }
+  }
+
+  function renderNotificationsAction() {
+    if (support === 'unsupported') {
+      return <Badge tone="neutral">Unsupported</Badge>;
+    }
+    if (support === 'denied') {
+      return <Badge tone="neutral">Blocked</Badge>;
+    }
+    if (enabledHere) {
+      return (
+        <Button variant="ghost" size="sm" onClick={handleDisableNotifications} disabled={busy}>
+          {busy ? '…' : 'Turn off'}
+        </Button>
+      );
+    }
+    return (
+      <Button variant="secondary" size="sm" onClick={handleEnableNotifications} disabled={busy}>
+        {busy ? '…' : 'Enable'}
+      </Button>
+    );
   }
 
   return (
@@ -39,6 +104,15 @@ export default function ProfilePage() {
         </Card>
 
         <Card padding="none">
+          <div className="profile-row profile-row--notifications">
+            <div>
+              <span className="profile-row__label">Notifications</span>
+              <p className="profile-row__description">Get reminders for your tasks and events.</p>
+            </div>
+            {renderNotificationsAction()}
+          </div>
+          {notifError && <p className="profile-row__error">{notifError}</p>}
+
           {rows.map((row) => (
             <div className="profile-row" key={row.label}>
               <span className="profile-row__label">{row.label}</span>
