@@ -10,6 +10,8 @@ import { addDays, getWeekDates, parseISODate, toISODate } from '../../lib/utils'
 import type { CalendarEvent, Task } from '../../types/task';
 import AddEventSheet from './AddEventSheet';
 import EventDetailsSheet from './EventDetailsSheet';
+import AddTaskSheet from '../tasks/AddTaskSheet';
+import TaskDetailsSheet from '../tasks/TaskDetailsSheet';
 import './CalendarPage.css';
 
 type View = 'month' | 'week' | 'day';
@@ -50,14 +52,29 @@ function toMinutes(time: string): number {
 
 export default function CalendarPage() {
   const { t } = useLocale();
-  const { events, eventsLoading, eventsError, addEvent, updateEvent, deleteEvent, tasks, reminders } =
-    useAppState();
+  const {
+    events,
+    eventsLoading,
+    eventsError,
+    addEvent,
+    updateEvent,
+    deleteEvent,
+    tasks,
+    updateTask,
+    deleteTask,
+    reminders,
+  } = useAppState();
 
   const [view, setView] = useState<View>('month');
   const [selectedDate, setSelectedDate] = useState(TODAY_ISO);
-  const [sheetOpen, setSheetOpen] = useState(false);
+
+  const [eventSheetOpen, setEventSheetOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
   const [detailsEvent, setDetailsEvent] = useState<CalendarEvent | null>(null);
+
+  const [taskSheetOpen, setTaskSheetOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [detailsTask, setDetailsTask] = useState<Task | null>(null);
 
   const referenceMonth = parseISODate(selectedDate);
   const cells = buildMonthGrid(referenceMonth);
@@ -101,27 +118,47 @@ export default function CalendarPage() {
 
   function openAdd() {
     setEditingEvent(null);
-    setSheetOpen(true);
+    setEventSheetOpen(true);
   }
 
-  function openDetails(event: CalendarEvent) {
+  function openEventDetails(event: CalendarEvent) {
     setDetailsEvent(event);
   }
 
-  function closeDetails() {
+  function closeEventDetails() {
     setDetailsEvent(null);
   }
 
-  function editFromDetails() {
+  function editEventFromDetails() {
     if (!detailsEvent) return;
     setEditingEvent(detailsEvent);
     setDetailsEvent(null);
-    setSheetOpen(true);
+    setEventSheetOpen(true);
   }
 
-  function closeSheet() {
-    setSheetOpen(false);
+  function closeEventSheet() {
+    setEventSheetOpen(false);
     setEditingEvent(null);
+  }
+
+  function openTaskDetails(task: Task) {
+    setDetailsTask(task);
+  }
+
+  function closeTaskDetails() {
+    setDetailsTask(null);
+  }
+
+  function editTaskFromDetails() {
+    if (!detailsTask) return;
+    setEditingTask(detailsTask);
+    setDetailsTask(null);
+    setTaskSheetOpen(true);
+  }
+
+  function closeTaskSheet() {
+    setTaskSheetOpen(false);
+    setEditingTask(null);
   }
 
   return (
@@ -246,7 +283,7 @@ export default function CalendarPage() {
                   <button
                     key={`event-${item.event.id}`}
                     className="calendar-event-row calendar-event-row--clickable"
-                    onClick={() => openDetails(item.event)}
+                    onClick={() => openEventDetails(item.event)}
                   >
                     <div className="calendar-event-row__time">
                       {item.event.allDay ? 'All day' : item.event.startTime ?? ''}
@@ -288,14 +325,43 @@ export default function CalendarPage() {
                     </Badge>
                   </button>
                 ) : (
-                  <div key={`task-${item.task.id}`} className="calendar-event-row">
+                  <button
+                    key={`task-${item.task.id}`}
+                    className="calendar-event-row calendar-event-row--clickable"
+                    onClick={() => openTaskDetails(item.task)}
+                  >
                     <div className="calendar-event-row__time">{item.task.dueTime ?? ''}</div>
                     <div className="calendar-event-row__line" />
                     <div className="calendar-event-row__body">
-                      <p className="calendar-event-row__title">{item.task.title}</p>
+                      <p className="calendar-event-row__title">
+                        {item.task.title}
+                        {reminders.some((r) => r.taskId === item.task.id) && (
+                          <svg
+                            className="calendar-event-row__reminder-icon"
+                            width="12"
+                            height="12"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            aria-label="Reminder set"
+                          >
+                            <path
+                              d="M12 4a5 5 0 00-5 5v3.2c0 .5-.18.98-.5 1.36L5 15.5c-.6.7-.1 1.8.8 1.8h12.4c.9 0 1.4-1.1.8-1.8l-1.5-1.94a2.1 2.1 0 01-.5-1.36V9a5 5 0 00-5-5z"
+                              stroke="currentColor"
+                              strokeWidth="1.6"
+                              strokeLinejoin="round"
+                            />
+                            <path
+                              d="M10 19.5a2 2 0 004 0"
+                              stroke="currentColor"
+                              strokeWidth="1.6"
+                              strokeLinecap="round"
+                            />
+                          </svg>
+                        )}
+                      </p>
                     </div>
                     <Badge tone="primary">Task</Badge>
-                  </div>
+                  </button>
                 ),
               )
             )}
@@ -310,26 +376,26 @@ export default function CalendarPage() {
       </IconButton>
 
       <AddEventSheet
-        open={sheetOpen}
+        open={eventSheetOpen}
         event={editingEvent}
         existingReminder={
           editingEvent ? reminders.find((r) => r.eventId === editingEvent.id) ?? null : null
         }
         defaultDate={selectedDate}
-        onClose={closeSheet}
+        onClose={closeEventSheet}
         onSave={async (input) => {
           if (editingEvent) {
             await updateEvent(editingEvent.id, input);
           } else {
             await addEvent(input);
           }
-          closeSheet();
+          closeEventSheet();
         }}
         onDelete={
           editingEvent
             ? async () => {
                 await deleteEvent(editingEvent.id);
-                closeSheet();
+                closeEventSheet();
               }
             : undefined
         }
@@ -339,12 +405,48 @@ export default function CalendarPage() {
         open={Boolean(detailsEvent)}
         event={detailsEvent}
         reminder={detailsEvent ? reminders.find((r) => r.eventId === detailsEvent.id) ?? null : null}
-        onClose={closeDetails}
-        onEdit={editFromDetails}
+        onClose={closeEventDetails}
+        onEdit={editEventFromDetails}
         onDelete={async () => {
           if (!detailsEvent) return;
           await deleteEvent(detailsEvent.id);
-          closeDetails();
+          closeEventDetails();
+        }}
+      />
+
+      <AddTaskSheet
+        open={taskSheetOpen}
+        task={editingTask}
+        existingReminder={
+          editingTask ? reminders.find((r) => r.taskId === editingTask.id) ?? null : null
+        }
+        onClose={closeTaskSheet}
+        onSave={async (input) => {
+          if (editingTask) {
+            await updateTask(editingTask.id, input);
+          }
+          closeTaskSheet();
+        }}
+        onDelete={
+          editingTask
+            ? async () => {
+                await deleteTask(editingTask.id);
+                closeTaskSheet();
+              }
+            : undefined
+        }
+      />
+
+      <TaskDetailsSheet
+        open={Boolean(detailsTask)}
+        task={detailsTask}
+        reminder={detailsTask ? reminders.find((r) => r.taskId === detailsTask.id) ?? null : null}
+        onClose={closeTaskDetails}
+        onEdit={editTaskFromDetails}
+        onDelete={async () => {
+          if (!detailsTask) return;
+          await deleteTask(detailsTask.id);
+          closeTaskDetails();
         }}
       />
     </>

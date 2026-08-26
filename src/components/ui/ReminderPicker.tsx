@@ -33,8 +33,15 @@ export default function ReminderPicker({
   atLabel = 'At time',
   customError,
 }: ReminderPickerProps) {
-  // Relative presets need a real base moment to count backwards from.
-  const canUseRelativePresets = Boolean(parentDate && parentTime);
+  // Relative presets need a real base moment to count backwards from. In
+  // addition to the parent's current date/time fields, also keep them
+  // available if the picker's current value is already a relative preset
+  // (i.e. an existing saved reminder) — otherwise reopening Edit could
+  // briefly/incorrectly collapse to None + Custom before the parent's own
+  // date/time fields have settled, hiding the very preset that's selected.
+  const hasValidParentDateTime = Boolean(parentDate?.trim() && parentTime?.trim());
+  const valueIsRelativePreset = RELATIVE_PRESETS.some((p) => p.key === value.preset);
+  const canUseRelativePresets = hasValidParentDateTime || valueIsRelativePreset;
 
   const options: { key: ReminderPresetKey; label: string }[] = [
     { key: 'none', label: 'None' },
@@ -50,7 +57,7 @@ export default function ReminderPicker({
   return (
     <div className="reminder-picker">
       <span className="reminder-picker__label">Reminder</span>
-      <div className="reminder-picker__chip-row scroll-row">
+      <div className="reminder-picker__chip-row">
         {options.map((opt) => (
           <button
             key={opt.key}
