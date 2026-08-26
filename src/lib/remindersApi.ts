@@ -54,57 +54,104 @@ export async function fetchReminders(userId: string): Promise<Reminder[]> {
 }
 
 /**
- * Creates or replaces the single reminder for a task. Relies on the
- * partial UNIQUE index on (task_id) to make this a safe upsert — at most
- * one reminder per task can ever exist.
+ * Creates or replaces the single reminder for a task/event.
+ *
+ * NOTE: this deliberately does NOT use Supabase's `.upsert(..., { onConflict })`.
+ * The one-reminder-per-parent guarantee is enforced by PARTIAL unique
+ * indexes (`... where task_id is not null` / `... where event_id is not
+ * null` — see 0005_reminders_refactor.sql), and PostgREST's `onConflict`
+ * option can only generate a plain `ON CONFLICT (column)` clause with no
+ * way to repeat that partial predicate. Postgres then can't match it to
+ * any constraint and rejects the whole request with `42P10: there is no
+ * unique or exclusion constraint matching the ON CONFLICT specification`.
+ * A plain select-then-update-or-insert works correctly with partial
+ * unique indexes because it never asks Postgres to infer a constraint —
+ * the indexes still do their job of preventing duplicates outright; this
+ * only changes how the client decides whether to UPDATE or INSERT.
  */
+async function upsertReminder(
+  userId: string,
+  parentColumn: 'task_id' | 'event_id',
+  parentId: string,
+  schedule: ReminderSchedule,
+): Promise<Reminder> {
+  const { data: existing, error: findError } = await supabase
+    .from('reminders')
+    .select('id')
+    .eq(parentColumn, parentId)
+    .maybeSingle();
+
+  if (findError) throw toSupabaseError('Could not save reminder', findError);
+
+  if (existing) {
+    const { data, error } = await supabase
+      .from('reminders')
+      .update({ remind_at: schedule.remindAt, offset_minutes: schedule.offsetMinutes ?? null })
+      .eq('id', existing.id)
+      .select('*')
+      .single();
+
+    if (error) throw toSupabaseError('Could not save reminder', error);
+    return rowToReminder(data as ReminderRow);
+  }
+
+  const { data, error } = await supabase
+    .from('reminders')
+    .insert({
+      user_id: userId,
+      task_id: parentColumn === 'task_id' ? parentId : null,
+      event_id: parentColumn === 'event_id' ? parentId : null,
+      remind_at: schedule.remindAt,
+      offset_minutes: schedule.offsetMinutes ?? null,
+    })
+    .select('*')
+    .single();
+
+  if (error) {
+    // 23505 = unique_violation — a reminder for this parent was inserted
+    // concurrently between the check above and this insert (the partial
+    // unique index just did its job). Fall back to updating that row
+    // instead of failing the save outright.
+    if (error.code === '23505') {
+      const { data: retryExisting } = await supabase
+        .from('reminders')
+        .select('id')
+        .eq(parentColumn, parentId)
+        .maybeSingle();
+
+      if (retryExisting) {
+        const { data: updated, error: updateError } = await supabase
+          .from('reminders')
+          .update({ remind_at: schedule.remindAt, offset_minutes: schedule.offsetMinutes ?? null })
+          .eq('id', retryExisting.id)
+          .select('*')
+          .single();
+
+        if (!updateError) return rowToReminder(updated as ReminderRow);
+      }
+    }
+    throw toSupabaseError('Could not save reminder', error);
+  }
+
+  return rowToReminder(data as ReminderRow);
+}
+
+/** Creates or replaces the single reminder for a task. See upsertReminder. */
 export async function upsertReminderForTask(
   userId: string,
   taskId: string,
   schedule: ReminderSchedule,
 ): Promise<Reminder> {
-  const { data, error } = await supabase
-    .from('reminders')
-    .upsert(
-      {
-        user_id: userId,
-        task_id: taskId,
-        event_id: null,
-        remind_at: schedule.remindAt,
-        offset_minutes: schedule.offsetMinutes ?? null,
-      },
-      { onConflict: 'task_id' },
-    )
-    .select('*')
-    .single();
-
-  if (error) throw toSupabaseError('Could not save reminder', error);
-  return rowToReminder(data as ReminderRow);
+  return upsertReminder(userId, 'task_id', taskId, schedule);
 }
 
-/** Creates or replaces the single reminder for a calendar event. See upsertReminderForTask. */
+/** Creates or replaces the single reminder for a calendar event. See upsertReminder. */
 export async function upsertReminderForEvent(
   userId: string,
   eventId: string,
   schedule: ReminderSchedule,
 ): Promise<Reminder> {
-  const { data, error } = await supabase
-    .from('reminders')
-    .upsert(
-      {
-        user_id: userId,
-        task_id: null,
-        event_id: eventId,
-        remind_at: schedule.remindAt,
-        offset_minutes: schedule.offsetMinutes ?? null,
-      },
-      { onConflict: 'event_id' },
-    )
-    .select('*')
-    .single();
-
-  if (error) throw toSupabaseError('Could not save reminder', error);
-  return rowToReminder(data as ReminderRow);
+  return upsertReminder(userId, 'event_id', eventId, schedule);
 }
 
 /** Removes the reminder for a task, if one exists (setting Reminder to "None"). */
