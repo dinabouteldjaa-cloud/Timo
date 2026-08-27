@@ -15,6 +15,13 @@
 //
 //     npx supabase functions deploy brain-dump
 //
+// CORS: the browser sends an OPTIONS preflight before the real POST when
+// calling this function from the frontend. That preflight is answered
+// first, before any other check, and the same CORS headers are attached
+// to every response (success and every error path) below — otherwise the
+// browser blocks the actual POST from ever being sent, regardless of
+// authentication.
+//
 // Required secret (set with `npx supabase secrets set NAME=value`):
 //   GROQ_API_KEY — private key for the Groq API. NEVER placed in
 //                 frontend/Vite code; used only inside this function.
@@ -182,9 +189,26 @@ function extractJson(rawText: string): unknown {
   return JSON.parse(cleaned);
 }
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+};
+
 Deno.serve(async (req) => {
+  // The browser sends a CORS preflight OPTIONS request before the actual
+  // POST when calling this function via supabase.functions.invoke() from
+  // the frontend. This must be answered before any other check (including
+  // the method guard below) or the browser never sends the real POST.
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
+
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+      status: 405,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -199,22 +223,34 @@ Deno.serve(async (req) => {
   });
   const { data: userData, error: userError } = await supabase.auth.getUser();
   if (userError || !userData?.user) {
-    return new Response(JSON.stringify({ error: 'Not authenticated' }), { status: 401 });
+    return new Response(JSON.stringify({ error: 'Not authenticated' }), {
+      status: 401,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 
   let body: { text?: unknown; localDate?: unknown; localTime?: unknown };
   try {
     body = await req.json();
   } catch {
-    return new Response(JSON.stringify({ error: 'Invalid request body' }), { status: 400 });
+    return new Response(JSON.stringify({ error: 'Invalid request body' }), {
+      status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 
   const text = typeof body.text === 'string' ? body.text.trim() : '';
   if (!text) {
-    return new Response(JSON.stringify({ error: 'No text provided' }), { status: 400 });
+    return new Response(JSON.stringify({ error: 'No text provided' }), {
+      status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
   if (text.length > MAX_INPUT_LENGTH) {
-    return new Response(JSON.stringify({ error: 'Text is too long' }), { status: 400 });
+    return new Response(JSON.stringify({ error: 'Text is too long' }), {
+      status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 
   const localDate =
@@ -228,7 +264,7 @@ Deno.serve(async (req) => {
   if (!apiKey) {
     return new Response(
       JSON.stringify({ error: 'Brain Dump is not configured for this deployment yet.' }),
-      { status: 500 },
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     );
   }
 
@@ -249,7 +285,10 @@ Deno.serve(async (req) => {
           ? "Timo is getting a lot of requests right now. Try again in a moment."
           : "Timo couldn't organize that right now. Try again.",
       }),
-      { status: isRateLimited ? 429 : 502 },
+      {
+        status: isRateLimited ? 429 : 502,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      },
     );
   }
 
@@ -261,7 +300,7 @@ Deno.serve(async (req) => {
     console.error('[brain-dump] malformed model output', err instanceof Error ? err.message : err);
     return new Response(
       JSON.stringify({ error: "Timo couldn't organize that right now. Try again." }),
-      { status: 502 },
+      { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     );
   }
 
@@ -276,6 +315,6 @@ Deno.serve(async (req) => {
     .slice(0, 20);
 
   return new Response(JSON.stringify({ suggestions }), {
-    headers: { 'Content-Type': 'application/json' },
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 });
