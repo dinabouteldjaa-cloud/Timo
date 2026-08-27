@@ -1,6 +1,6 @@
 import type { Task } from '../../types/task';
 import { useLocale } from '../../i18n/LocaleContext';
-import { formatDuration } from '../../lib/utils';
+import { formatDuration, toISODate } from '../../lib/utils';
 import Checkbox from './Checkbox';
 import Badge from './Badge';
 import './TaskRow.css';
@@ -15,6 +15,12 @@ interface TaskRowProps {
 export default function TaskRow({ task, onToggle, onOpen, hasReminder }: TaskRowProps) {
   const { t } = useLocale();
   const done = task.status === 'completed';
+
+  // A scheduled block only counts if it's for TODAY — a stale (past-day)
+  // scheduled_date must never be displayed as if it were today's plan.
+  const isScheduledToday =
+    task.scheduledDate === toISODate(new Date()) &&
+    Boolean(task.scheduledStartTime && task.scheduledEndTime);
 
   return (
     <div className={`task-row ${done ? 'task-row--done' : ''}`}>
@@ -47,7 +53,13 @@ export default function TaskRow({ task, onToggle, onOpen, hasReminder }: TaskRow
           )}
         </p>
         <div className="task-row__meta">
-          {task.dueTime && <span className="task-row__time">{task.dueTime}</span>}
+          {isScheduledToday ? (
+            <span className="task-row__time">
+              {task.scheduledStartTime}–{task.scheduledEndTime}
+            </span>
+          ) : (
+            task.dueTime && <span className="task-row__time">{task.dueTime}</span>
+          )}
           {task.estimatedMinutes && (
             <span className="task-row__duration">{formatDuration(task.estimatedMinutes, t)}</span>
           )}

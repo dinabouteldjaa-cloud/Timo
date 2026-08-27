@@ -20,6 +20,16 @@ export interface Task {
   dueDate?: string; // ISO date, e.g. 2026-08-24
   dueTime?: string; // e.g. "10:00"
   estimatedMinutes?: number;
+  // A planned execution window, set by accepting a Plan My Day proposal
+  // (see supabase/migrations/0010_task_scheduling.sql). Distinct from
+  // dueDate/dueTime, which remain the task's actual deadline. All three
+  // fields are present together or not at all — scheduledDate exists
+  // specifically so a stale (past-day) schedule is never mistaken for
+  // today's; the app must compare scheduledDate to today before treating
+  // a task as scheduled "now".
+  scheduledDate?: string; // "YYYY-MM-DD"
+  scheduledStartTime?: string; // "HH:MM"
+  scheduledEndTime?: string; // "HH:MM"
 }
 
 export type CalendarEventType = 'event' | 'meeting';

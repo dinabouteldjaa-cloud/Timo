@@ -89,6 +89,7 @@ export default function CalendarPage() {
     const set = new Set(events.map((e) => e.eventDate));
     tasks.forEach((task) => {
       if (task.dueDate) set.add(task.dueDate);
+      if (task.scheduledDate) set.add(task.scheduledDate);
     });
     return set;
   }, [events, tasks]);
@@ -103,12 +104,18 @@ export default function CalendarPage() {
       }));
 
     const taskItems: AgendaItem[] = tasks
-      .filter((task) => task.dueDate === selectedDate)
-      .map((task) => ({
-        kind: 'task' as const,
-        task,
-        sortKey: task.dueTime ? toMinutes(task.dueTime) : 24 * 60,
-      }));
+      .filter(
+        (task) => task.dueDate === selectedDate || task.scheduledDate === selectedDate,
+      )
+      .map((task) => {
+        const scheduledForThisDay = task.scheduledDate === selectedDate && task.scheduledStartTime;
+        const displayTime = scheduledForThisDay ? task.scheduledStartTime : task.dueTime;
+        return {
+          kind: 'task' as const,
+          task,
+          sortKey: displayTime ? toMinutes(displayTime) : 24 * 60,
+        };
+      });
 
     return [...eventItems, ...taskItems].sort((a, b) => a.sortKey - b.sortKey);
   }, [events, tasks, selectedDate]);
@@ -340,7 +347,13 @@ export default function CalendarPage() {
                     className="calendar-event-row calendar-event-row--clickable"
                     onClick={() => openTaskDetails(item.task)}
                   >
-                    <div className="calendar-event-row__time">{item.task.dueTime ?? ''}</div>
+                    <div className="calendar-event-row__time">
+                      {item.task.scheduledDate === selectedDate &&
+                      item.task.scheduledStartTime &&
+                      item.task.scheduledEndTime
+                        ? `${item.task.scheduledStartTime}–${item.task.scheduledEndTime}`
+                        : item.task.dueTime ?? ''}
+                    </div>
                     <div className="calendar-event-row__line" />
                     <div className="calendar-event-row__body">
                       <p className="calendar-event-row__title">

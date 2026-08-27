@@ -68,9 +68,9 @@ export default function TodayPage() {
           <ProgressBar value={progressPct} tone="success" />
         </Card>
 
-        {/* Plan my day — AI feature, not implemented yet */}
-        <Button fullWidth size="lg" variant="primary" disabled title="Coming soon">
-          ✨ {t.today.planMyDay} · Coming soon
+        {/* Plan my day — proposes a schedule for review, never saves automatically */}
+        <Button fullWidth size="lg" variant="primary" onClick={() => navigate('/plan-my-day')}>
+          ✨ {t.today.planMyDay}
         </Button>
 
         {/* Brain Dump — AI-assisted capture, review before anything is created */}

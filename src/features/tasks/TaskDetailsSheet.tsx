@@ -1,11 +1,20 @@
 import { useEffect, useState } from 'react';
 import Button from '../../components/ui/Button';
 import Badge from '../../components/ui/Badge';
-import { formatDuration } from '../../lib/utils';
+import { formatDuration, toISODate } from '../../lib/utils';
 import { formatReminderLabel } from '../../lib/reminderPresets';
 import { useLocale } from '../../i18n/LocaleContext';
 import type { Reminder, Task } from '../../types/task';
 import './TaskDetailsSheet.css';
+
+/** "14:00-15:00" for today's plan, or "Aug 26, 14:00-15:00" for a different day. */
+function plannedLabel(date: string, startTime: string, endTime: string): string {
+  if (date === toISODate(new Date())) return `${startTime}\u2013${endTime}`;
+  const dateLabel = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(
+    new Date(`${date}T00:00:00`),
+  );
+  return `${dateLabel}, ${startTime}\u2013${endTime}`;
+}
 
 interface TaskDetailsSheetProps {
   open: boolean;
@@ -101,6 +110,15 @@ export default function TaskDetailsSheet({
             <div className="task-details-row">
               <span className="task-details-row__label">Due time</span>
               <span className="task-details-row__value">{task.dueTime}</span>
+            </div>
+          )}
+
+          {task.scheduledDate && task.scheduledStartTime && task.scheduledEndTime && (
+            <div className="task-details-row">
+              <span className="task-details-row__label">Planned</span>
+              <span className="task-details-row__value">
+                {plannedLabel(task.scheduledDate, task.scheduledStartTime, task.scheduledEndTime)}
+              </span>
             </div>
           )}
 

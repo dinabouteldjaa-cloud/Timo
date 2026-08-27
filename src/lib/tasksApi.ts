@@ -19,6 +19,9 @@ interface TaskRow {
   due_date: string | null;
   due_time: string | null;
   estimated_duration_minutes: number | null;
+  scheduled_date: string | null;
+  scheduled_start_time: string | null;
+  scheduled_end_time: string | null;
   completed_at: string | null;
   created_at: string;
   updated_at: string;
@@ -36,6 +39,9 @@ function rowToTask(row: TaskRow): Task {
     // Postgres `time` comes back as "HH:MM:SS" — trim to "HH:MM" for <input type="time">.
     dueTime: row.due_time ? row.due_time.slice(0, 5) : undefined,
     estimatedMinutes: row.estimated_duration_minutes ?? undefined,
+    scheduledDate: row.scheduled_date ?? undefined,
+    scheduledStartTime: row.scheduled_start_time ? row.scheduled_start_time.slice(0, 5) : undefined,
+    scheduledEndTime: row.scheduled_end_time ? row.scheduled_end_time.slice(0, 5) : undefined,
   };
 }
 
@@ -121,4 +127,31 @@ export async function setTaskStatus(taskId: string, status: TaskStatus): Promise
 export async function deleteTask(taskId: string): Promise<void> {
   const { error } = await supabase.from('tasks').delete().eq('id', taskId);
   if (error) throw toSupabaseError('Could not delete task', error);
+}
+
+/**
+ * Sets or clears a task's planned execution block (see
+ * supabase/migrations/0010_task_scheduling.sql). Deliberately a narrow,
+ * targeted update — separate from the full updateTask() above — so
+ * accepting a Plan My Day proposal never touches title/priority/category/
+ * reminder or any other field on the task. Passing null clears all three
+ * fields together — the DB constraint requires them to be all-or-nothing.
+ */
+export async function updateTaskSchedule(
+  taskId: string,
+  schedule: { date: string; startTime: string; endTime: string } | null,
+): Promise<Task> {
+  const { data, error } = await supabase
+    .from('tasks')
+    .update({
+      scheduled_date: schedule?.date ?? null,
+      scheduled_start_time: schedule?.startTime ?? null,
+      scheduled_end_time: schedule?.endTime ?? null,
+    })
+    .eq('id', taskId)
+    .select('*')
+    .single();
+
+  if (error) throw toSupabaseError('Could not schedule task', error);
+  return rowToTask(data as TaskRow);
 }

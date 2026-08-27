@@ -95,6 +95,10 @@ interface AppStateValue {
   updateTask: (id: string, input: NewTaskInput) => Promise<void>;
   toggleTask: (id: string) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
+  setTaskSchedule: (
+    id: string,
+    schedule: { date: string; startTime: string; endTime: string } | null,
+  ) => Promise<void>;
 
   events: CalendarEvent[];
   eventsLoading: boolean;
@@ -330,6 +334,21 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       }
     },
     [tasks, reminders],
+  );
+
+  const setTaskSchedule = useCallback(
+    async (id: string, schedule: { date: string; startTime: string; endTime: string } | null) => {
+      try {
+        const updated = await tasksApi.updateTaskSchedule(id, schedule);
+        setTasks((prev) => prev.map((task) => (task.id === id ? updated : task)));
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] setTaskSchedule failed', err);
+        setTasksError(err instanceof Error ? err.message : 'Could not schedule task.');
+        throw err;
+      }
+    },
+    [],
   );
 
   // --- Calendar events ----------------------------------------------------
@@ -663,6 +682,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       updateTask,
       toggleTask,
       deleteTask,
+      setTaskSchedule,
       events,
       eventsLoading,
       eventsError,
@@ -693,6 +713,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       updateTask,
       toggleTask,
       deleteTask,
+      setTaskSchedule,
       events,
       eventsLoading,
       eventsError,
