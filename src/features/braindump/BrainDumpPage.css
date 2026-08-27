@@ -1,0 +1,84 @@
+.brain-dump-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-5) var(--space-8);
+}
+
+.brain-dump-hero {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  background: linear-gradient(135deg, var(--color-primary-soft), var(--color-surface) 70%);
+}
+
+.brain-dump-hero__text {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+.brain-dump-textarea {
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  font-size: 14.5px;
+  color: var(--color-text);
+  font-family: inherit;
+  resize: vertical;
+  min-height: 160px;
+}
+
+.brain-dump-textarea:focus {
+  border-color: var(--color-primary);
+  outline: none;
+}
+
+.brain-dump-error {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-error-soft);
+  color: var(--color-error);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.brain-dump-loading,
+.brain-dump-done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-4);
+  padding: var(--space-10) var(--space-4);
+}
+
+.brain-dump-loading p {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.brain-dump-done__message {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--color-text);
+}
+
+.brain-dump-review-intro {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+.brain-dump-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}

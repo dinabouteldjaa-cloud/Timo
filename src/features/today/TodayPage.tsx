@@ -73,6 +73,15 @@ export default function TodayPage() {
           ✨ {t.today.planMyDay} · Coming soon
         </Button>
 
+        {/* Brain Dump — AI-assisted capture, review before anything is created */}
+        <button className="today-braindump-card" onClick={() => navigate('/brain-dump')}>
+          <span className="today-braindump-card__icon">🧠</span>
+          <span className="today-braindump-card__text">
+            <span className="today-braindump-card__title">Brain Dump</span>
+            <span className="today-braindump-card__subtitle">Tell Timo everything on your mind</span>
+          </span>
+        </button>
+
         {/* Up next */}
         <Card padding="md">
           <p className="today-section-label">{t.today.upNext}</p>

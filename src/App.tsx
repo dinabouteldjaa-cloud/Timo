@@ -6,6 +6,7 @@ import TodayPage from './features/today/TodayPage';
 import TasksPage from './features/tasks/TasksPage';
 import CalendarPage from './features/calendar/CalendarPage';
 import FocusPage from './features/focus/FocusPage';
+import BrainDumpPage from './features/braindump/BrainDumpPage';
 import ProfilePage from './features/profile/ProfilePage';
 import LoginPage from './features/auth/LoginPage';
 import SignupPage from './features/auth/SignupPage';
@@ -56,6 +57,7 @@ export default function App() {
                         <Route path="/tasks" element={<TasksPage />} />
                         <Route path="/calendar" element={<CalendarPage />} />
                         <Route path="/focus" element={<FocusPage />} />
+                        <Route path="/brain-dump" element={<BrainDumpPage />} />
                         <Route path="/profile" element={<ProfilePage />} />
                       </Routes>
                     </AppShell>

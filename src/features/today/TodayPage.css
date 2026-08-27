@@ -175,3 +175,45 @@
   justify-content: center;
   font-weight: 800;
 }
+
+.today-braindump-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  border: none;
+  background: linear-gradient(135deg, var(--color-primary-soft), var(--color-surface-alt));
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  cursor: pointer;
+  text-align: left;
+}
+
+.today-braindump-card__icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.today-braindump-card__text {
+  display: flex;
+  flex-direction: column;
+}
+
+.today-braindump-card__title {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.today-braindump-card__subtitle {
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+  margin-top: 1px;
+}

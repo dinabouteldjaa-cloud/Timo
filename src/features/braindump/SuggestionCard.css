@@ -1,0 +1,122 @@
+.suggestion-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-lg);
+}
+
+.suggestion-card--excluded {
+  opacity: 0.55;
+}
+
+.suggestion-card__top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.suggestion-card__badges {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+
+.suggestion-card__remove {
+  border: none;
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
+.suggestion-card__title-input {
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.suggestion-card__title-input:focus {
+  border-color: var(--color-primary);
+  outline: none;
+}
+
+.suggestion-card__row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: var(--space-2);
+}
+
+.suggestion-card__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.suggestion-card__label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.suggestion-card__input {
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 13.5px;
+  color: var(--color-text);
+}
+
+.suggestion-card__input:focus {
+  border-color: var(--color-primary);
+  outline: none;
+}
+
+.suggestion-card__input--error {
+  border-color: var(--color-error);
+}
+
+.suggestion-card__hint {
+  margin: -4px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-error);
+}
+
+.suggestion-card__chip-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.suggestion-card__chip {
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
+  border-radius: var(--radius-pill);
+  padding: 6px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.suggestion-card__chip--active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+  color: var(--color-primary-dark);
+}
