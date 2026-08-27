@@ -2,11 +2,21 @@ import { useNavigate } from 'react-router-dom';
 import Header from '../../components/layout/Header';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
+import Badge from '../../components/ui/Badge';
 import { useLocale } from '../../i18n/LocaleContext';
 import { useAppState } from '../../state/AppStateContext';
+import { formatLocalShortDate, formatLocalTime } from '../../lib/utils';
 import './FocusPage.css';
 
 const durations = [15, 25, 45, 60];
+const RECENT_SESSIONS_SHOWN = 5;
+
+/** Rounds only at display time — seconds are summed/stored precisely. */
+function formatSessionDuration(actualSeconds: number): string {
+  if (actualSeconds < 60) return `${actualSeconds} sec`;
+  const minutes = Math.round(actualSeconds / 60);
+  return `${minutes} min`;
+}
 
 export default function FocusPage() {
   const { t } = useLocale();
@@ -14,7 +24,9 @@ export default function FocusPage() {
   const {
     tasks,
     focusSession,
-    focusStats,
+    focusHistory,
+    focusHistoryError,
+    todayFocusSummary,
     selectFocusTask,
     selectFocusDuration,
     startFocus,
@@ -35,6 +47,9 @@ export default function FocusPage() {
   const isPaused = focusSession.status === 'paused';
   const isCompleted = focusSession.status === 'completed';
   const isActive = isRunning || isPaused;
+
+  const recentSessions = focusHistory.slice(0, RECENT_SESSIONS_SHOWN);
+  const todayMinutesRounded = Math.round(todayFocusSummary.secondsToday / 60);
 
   // A running/paused session is preserved in shared app state, so leaving
   // via the back button (or any other navigation) doesn't destroy it — the
@@ -134,6 +149,8 @@ export default function FocusPage() {
           )}
         </Card>
 
+        {focusHistoryError && <p className="focus-error-banner">{focusHistoryError}</p>}
+
         <div>
           <p className="focus-section-label">{t.focus.selectTask}</p>
           <Card padding="none">
@@ -158,15 +175,45 @@ export default function FocusPage() {
           <p className="focus-section-label">{t.focus.todaysSummary}</p>
           <div className="focus-stats-row">
             <div className="focus-stat">
-              <span className="focus-stat__value">{focusStats.sessionsCompleted}</span>
+              <span className="focus-stat__value">{todayFocusSummary.sessionsToday}</span>
               <span className="focus-stat__label">{t.focus.sessionsCompleted}</span>
             </div>
             <div className="focus-stat">
-              <span className="focus-stat__value">{focusStats.minutesFocused}</span>
+              <span className="focus-stat__value">{todayMinutesRounded}</span>
               <span className="focus-stat__label">{t.focus.minutesFocused}</span>
             </div>
           </div>
         </Card>
+
+        {recentSessions.length > 0 && (
+          <div>
+            <p className="focus-section-label">Recent sessions</p>
+            <Card padding="none">
+              {recentSessions.map((session) => {
+                const linkedTask = session.taskId
+                  ? tasks.find((task) => task.id === session.taskId)
+                  : undefined;
+                return (
+                  <div key={session.id} className="focus-history-row">
+                    <div className="focus-history-row__body">
+                      <p className="focus-history-row__title">
+                        {linkedTask ? linkedTask.title : 'Focus session'}
+                      </p>
+                      <p className="focus-history-row__meta">
+                        {formatLocalShortDate(session.startedAt)} ·{' '}
+                        {formatLocalTime(session.startedAt)} ·{' '}
+                        {formatSessionDuration(session.actualSeconds)}
+                      </p>
+                    </div>
+                    <Badge tone={session.status === 'completed' ? 'success' : 'neutral'}>
+                      {session.status === 'completed' ? 'Completed' : 'Ended early'}
+                    </Badge>
+                  </div>
+                );
+              })}
+            </Card>
+          </div>
+        )}
       </div>
     </>
   );

@@ -55,3 +55,23 @@ export interface Reminder {
   taskId?: string;
   eventId?: string;
 }
+
+export type FocusSessionStatus = 'completed' | 'ended_early';
+
+/**
+ * A persisted record of a finished Focus session (see
+ * supabase/migrations/0009_focus_sessions.sql). The live countdown itself
+ * lives only in React state; a record like this is only ever written once
+ * a session actually finishes (naturally or via "End session").
+ */
+export interface FocusSessionRecord {
+  id: string;
+  taskId?: string;
+  startedAt: string; // ISO timestamp
+  endedAt: string; // ISO timestamp
+  plannedMinutes: number;
+  // Seconds, not minutes — see the migration's notes on why this is more
+  // accurate for short/early-ended sessions. Round only at display time.
+  actualSeconds: number;
+  status: FocusSessionStatus;
+}

@@ -8,12 +8,21 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { CalendarEvent, CalendarEventType, Reminder, Task, TaskCategory, TaskPriority } from '../types/task';
+import type {
+  CalendarEvent,
+  CalendarEventType,
+  FocusSessionRecord,
+  Reminder,
+  Task,
+  TaskCategory,
+  TaskPriority,
+} from '../types/task';
 import { toISODate } from '../lib/utils';
 import { useAuth } from './AuthContext';
 import * as tasksApi from '../lib/tasksApi';
 import * as eventsApi from '../lib/calendarEventsApi';
 import * as remindersApi from '../lib/remindersApi';
+import * as focusSessionsApi from '../lib/focusSessionsApi';
 import type { ReminderSchedule } from '../lib/remindersApi';
 
 // ---------------------------------------------------------------------------
@@ -67,11 +76,15 @@ interface FocusSessionState {
   durationMinutes: number;
   secondsLeft: number;
   selectedTaskId: string | null;
+  // Real wall-clock start of the current run, captured once when a fresh
+  // session begins (not reset across pause/resume). Used to build the
+  // started_at/ended_at pair saved to Supabase — see persistFocusSession.
+  startedAt: string | null;
 }
 
-interface FocusStatsState {
-  sessionsCompleted: number;
-  minutesFocused: number;
+interface TodayFocusSummary {
+  sessionsToday: number;
+  secondsToday: number;
 }
 
 interface AppStateValue {
@@ -99,7 +112,10 @@ interface AppStateValue {
   remindersError: string | null;
 
   focusSession: FocusSessionState;
-  focusStats: FocusStatsState;
+  focusHistory: FocusSessionRecord[];
+  focusHistoryLoading: boolean;
+  focusHistoryError: string | null;
+  todayFocusSummary: TodayFocusSummary;
   selectFocusTask: (id: string) => void;
   selectFocusDuration: (minutes: number) => void;
   startFocus: () => void;
@@ -427,18 +443,98 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     return upcoming[0] ?? null;
   }, [events]);
 
-  // --- Focus session (local-only, unchanged from previous phase) ------
+  // --- Focus session ----------------------------------------------------
+  // The live countdown stays entirely in React state — it is never written
+  // to Supabase every second (see AppStateProvider's module doc). Only a
+  // single row is saved once a session actually finishes, via
+  // persistFocusSession below.
   const [focusSession, setFocusSession] = useState<FocusSessionState>({
     status: 'idle',
     durationMinutes: DEFAULT_DURATION,
     secondsLeft: DEFAULT_DURATION * 60,
     selectedTaskId: null,
+    startedAt: null,
   });
 
-  const [focusStats, setFocusStats] = useState<FocusStatsState>({
-    sessionsCompleted: 0,
-    minutesFocused: 0,
-  });
+  const [focusHistory, setFocusHistory] = useState<FocusSessionRecord[]>([]);
+  const [focusHistoryLoading, setFocusHistoryLoading] = useState(false);
+  const [focusHistoryError, setFocusHistoryError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!userId) {
+      setFocusHistory([]);
+      setFocusHistoryError(null);
+      return;
+    }
+    let cancelled = false;
+    setFocusHistoryLoading(true);
+    setFocusHistoryError(null);
+    focusSessionsApi
+      .fetchFocusSessions(userId)
+      .then((loaded) => {
+        if (!cancelled) setFocusHistory(loaded);
+      })
+      .catch((err: Error) => {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] fetchFocusSessions failed', err);
+        if (!cancelled) setFocusHistoryError(err.message || 'Could not load focus history.');
+      })
+      .finally(() => {
+        if (!cancelled) setFocusHistoryLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  // Prevents a session from being saved twice — e.g. if the natural
+  // completion path and a subsequent "Done" tap both attempted to persist
+  // the same session. Reset whenever a fresh session actually starts.
+  const focusSaveGuardRef = useRef(false);
+
+  const persistFocusSession = useCallback(
+    async (params: {
+      taskId: string | null;
+      startedAt: string;
+      plannedMinutes: number;
+      actualSeconds: number;
+      status: 'completed' | 'ended_early';
+    }) => {
+      if (!userId) return;
+      if (focusSaveGuardRef.current) return;
+      focusSaveGuardRef.current = true;
+      try {
+        const saved = await focusSessionsApi.saveFocusSession(userId, {
+          taskId: params.taskId,
+          startedAt: params.startedAt,
+          endedAt: new Date().toISOString(),
+          plannedMinutes: params.plannedMinutes,
+          actualSeconds: params.actualSeconds,
+          status: params.status,
+        });
+        setFocusHistory((prev) => [saved, ...prev]);
+        setFocusHistoryError(null);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] persistFocusSession failed', err);
+        setFocusHistoryError(
+          err instanceof Error ? err.message : 'Could not save your focus session.',
+        );
+      }
+    },
+    [userId],
+  );
+
+  // Today's sessions/seconds, derived from persisted history so it
+  // survives a refresh (unlike a local-only counter would).
+  const todayFocusSummary = useMemo<TodayFocusSummary>(() => {
+    const todayISO = toISODate(new Date());
+    const todays = focusHistory.filter((session) => toISODate(new Date(session.startedAt)) === todayISO);
+    return {
+      sessionsToday: todays.length,
+      secondsToday: todays.reduce((sum, session) => sum + session.actualSeconds, 0),
+    };
+  }, [focusHistory]);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -466,19 +562,27 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const completeSession = useCallback(() => {
     clearTimer();
     setFocusSession((prev) => {
-      const minutesElapsed = prev.durationMinutes - Math.floor(prev.secondsLeft / 60);
-      setFocusStats((stats) => ({
-        sessionsCompleted: stats.sessionsCompleted + 1,
-        minutesFocused: stats.minutesFocused + Math.max(minutesElapsed, prev.durationMinutes),
-      }));
+      // secondsLeft only ever decrements while status === 'running', so
+      // this is already exact to the second (pauses are naturally
+      // excluded) — no separate elapsed-time tracking needed.
+      const actualSeconds = prev.durationMinutes * 60 - prev.secondsLeft;
+      if (prev.startedAt) {
+        void persistFocusSession({
+          taskId: prev.selectedTaskId,
+          startedAt: prev.startedAt,
+          plannedMinutes: prev.durationMinutes,
+          actualSeconds,
+          status: 'completed',
+        });
+      }
       return { ...prev, status: 'completed', secondsLeft: 0 };
     });
-  }, [clearTimer]);
+  }, [clearTimer, persistFocusSession]);
 
   const tick = useCallback(() => {
     setFocusSession((prev) => {
-      if (prev.secondsLeft <= 1) {
-        return prev; // completion handled by effect below via completeSession
+      if (prev.secondsLeft <= 0) {
+        return prev; // already at zero; the completion effect takes it from here
       }
       return { ...prev, secondsLeft: prev.secondsLeft - 1 };
     });
@@ -491,11 +595,20 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   }, [focusSession.status, focusSession.secondsLeft, completeSession]);
 
   const startFocus = useCallback(() => {
-    setFocusSession((prev) => ({
-      ...prev,
-      status: 'running',
-      secondsLeft: prev.status === 'paused' ? prev.secondsLeft : prev.durationMinutes * 60,
-    }));
+    setFocusSession((prev) => {
+      const startingFresh = prev.status !== 'paused';
+      if (startingFresh) {
+        // A brand-new session — clear the guard so it can be saved once
+        // it finishes, and capture a real wall-clock start time.
+        focusSaveGuardRef.current = false;
+      }
+      return {
+        ...prev,
+        status: 'running',
+        secondsLeft: prev.status === 'paused' ? prev.secondsLeft : prev.durationMinutes * 60,
+        startedAt: startingFresh ? new Date().toISOString() : prev.startedAt,
+      };
+    });
     clearTimer();
     intervalRef.current = setInterval(tick, 1000);
   }, [clearTimer, tick]);
@@ -514,21 +627,32 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const endFocus = useCallback(() => {
     clearTimer();
     setFocusSession((prev) => {
-      const minutesElapsed = prev.durationMinutes - Math.ceil(prev.secondsLeft / 60);
-      if (minutesElapsed > 0) {
-        setFocusStats((stats) => ({
-          sessionsCompleted: stats.sessionsCompleted + 1,
-          minutesFocused: stats.minutesFocused + minutesElapsed,
-        }));
+      // Only persist as "ended_early" if the session was actually still
+      // running/paused. If status is already 'completed', it was already
+      // saved by completeSession — this branch just resets state, so a
+      // "Done" tap after natural completion never double-saves.
+      const isEndingEarly = prev.status === 'running' || prev.status === 'paused';
+      if (isEndingEarly && prev.startedAt) {
+        const actualSeconds = prev.durationMinutes * 60 - prev.secondsLeft;
+        if (actualSeconds > 0) {
+          void persistFocusSession({
+            taskId: prev.selectedTaskId,
+            startedAt: prev.startedAt,
+            plannedMinutes: prev.durationMinutes,
+            actualSeconds,
+            status: 'ended_early',
+          });
+        }
       }
       return {
         status: 'idle',
         durationMinutes: prev.durationMinutes,
         secondsLeft: prev.durationMinutes * 60,
         selectedTaskId: prev.selectedTaskId,
+        startedAt: null,
       };
     });
-  }, [clearTimer]);
+  }, [clearTimer, persistFocusSession]);
 
   const value = useMemo<AppStateValue>(
     () => ({
@@ -550,7 +674,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       remindersLoading,
       remindersError,
       focusSession,
-      focusStats,
+      focusHistory,
+      focusHistoryLoading,
+      focusHistoryError,
+      todayFocusSummary,
       selectFocusTask,
       selectFocusDuration,
       startFocus,
@@ -577,7 +704,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       remindersLoading,
       remindersError,
       focusSession,
-      focusStats,
+      focusHistory,
+      focusHistoryLoading,
+      focusHistoryError,
+      todayFocusSummary,
       selectFocusTask,
       selectFocusDuration,
       startFocus,

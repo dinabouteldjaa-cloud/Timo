@@ -24,6 +24,7 @@ export default function TodayPage() {
     upcomingEvent,
     reminders,
     focusSession,
+    todayFocusSummary,
   } = useAppState();
   const [quickAddOpen, setQuickAddOpen] = useState(false);
 
@@ -37,6 +38,10 @@ export default function TodayPage() {
   const taskIdsWithReminder = new Set(
     reminders.filter((r) => r.taskId).map((r) => r.taskId as string),
   );
+
+  const focusIsActive = focusSession.status === 'running' || focusSession.status === 'paused';
+  const todayFocusMinutes = Math.round(todayFocusSummary.secondsToday / 60);
+  const hasFocusHistoryToday = !focusIsActive && todayFocusSummary.sessionsToday > 0;
 
   return (
     <>
@@ -95,16 +100,22 @@ export default function TodayPage() {
         <Card padding="md" className="today-focus-card">
           <div className="today-focus-card__row">
             <div>
-              <p className="today-section-label">
-                {focusSession.status === 'running' || focusSession.status === 'paused'
-                  ? 'Focus session in progress'
-                  : t.today.focusAvailable}
-              </p>
+              {hasFocusHistoryToday ? (
+                <>
+                  <p className="today-focus-card__title">Today's Focus</p>
+                  <p className="today-focus-card__stats">
+                    {todayFocusMinutes} min · {todayFocusSummary.sessionsToday} session
+                    {todayFocusSummary.sessionsToday === 1 ? '' : 's'}
+                  </p>
+                </>
+              ) : (
+                <p className="today-section-label">
+                  {focusIsActive ? 'Focus session in progress' : t.today.focusAvailable}
+                </p>
+              )}
             </div>
             <Button variant="secondary" size="sm" onClick={() => navigate('/focus')}>
-              {focusSession.status === 'running' || focusSession.status === 'paused'
-                ? 'Resume'
-                : t.today.startFocus}
+              {focusIsActive ? 'Resume' : t.today.startFocus}
             </Button>
           </div>
         </Card>

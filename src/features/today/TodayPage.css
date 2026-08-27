@@ -122,6 +122,20 @@
   letter-spacing: 0;
 }
 
+.today-focus-card__title {
+  margin: 0 0 2px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.today-focus-card__stats {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
 .today-empty {
   margin: 0;
   padding: var(--space-4) 0;
