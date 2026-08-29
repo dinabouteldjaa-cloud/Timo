@@ -98,6 +98,22 @@ export default function SuggestionCard({ suggestion, onChange, onRemove }: Sugge
 
       {!isEvent && (
         <>
+          <label className="suggestion-card__field">
+            <span className="suggestion-card__label">Estimated duration (min)</span>
+            <input
+              className="suggestion-card__input"
+              type="number"
+              min={0}
+              step={5}
+              placeholder="Optional"
+              value={suggestion.estimatedMinutes ?? ''}
+              onChange={(e) =>
+                onChange({
+                  estimatedMinutes: e.target.value ? Number(e.target.value) : undefined,
+                })
+              }
+            />
+          </label>
           <div className="suggestion-card__field">
             <span className="suggestion-card__label">Priority</span>
             <div className="suggestion-card__chip-row">
@@ -106,7 +122,7 @@ export default function SuggestionCard({ suggestion, onChange, onRemove }: Sugge
                   key={p}
                   type="button"
                   className={`suggestion-card__chip ${suggestion.priority === p ? 'suggestion-card__chip--active' : ''}`}
-                  onClick={() => onChange({ priority: p })}
+                  onClick={() => onChange({ priority: suggestion.priority === p ? undefined : p })}
                 >
                   {PRIORITY_LABELS[p]}
                 </button>

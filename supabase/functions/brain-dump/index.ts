@@ -97,9 +97,56 @@ interface NormalizedSuggestion {
 const MAX_INPUT_LENGTH = 4000;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const WEEKDAY_NAMES = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+];
 
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.trim().length > 0;
+}
+
+/**
+ * Parses/formats/adds days on a "YYYY-MM-DD" string using only local date
+ * *components* (never toISOString/getUTC*), so this is timezone-neutral —
+ * it's pure calendar arithmetic on the digits the client already resolved
+ * to its own local date, not a UTC conversion. No timezone (e.g. UTC+3) is
+ * ever assumed here.
+ */
+function parseLocalDate(dateStr: string): Date {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function formatLocalDate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * Deterministically resolves the date for each weekday over the coming
+ * week, so the model never has to compute "next Monday" itself — it's
+ * told the exact answer. This is what fixes the observed weekday/date
+ * mix-ups: the model was previously asked to do calendar arithmetic from
+ * only a single reference date, which it did unreliably.
+ */
+function computeWeekdayTable(localDate: string): { todayWeekday: string; upcoming: { weekday: string; date: string }[] } {
+  const base = parseLocalDate(localDate);
+  const todayWeekday = WEEKDAY_NAMES[base.getDay()];
+  const upcoming: { weekday: string; date: string }[] = [];
+  for (let offset = 1; offset <= 7; offset++) {
+    const d = new Date(base.getTime());
+    d.setDate(d.getDate() + offset);
+    upcoming.push({ weekday: WEEKDAY_NAMES[d.getDay()], date: formatLocalDate(d) });
+  }
+  return { todayWeekday, upcoming };
 }
 
 /** Validates and coerces one raw model item into a safe, schema-conforming suggestion, or null if unusable. */
@@ -142,19 +189,42 @@ function normalizeSuggestion(raw: RawSuggestion): NormalizedSuggestion | null {
 }
 
 function buildSystemPrompt(localDate: string, localTime: string): string {
+  const { todayWeekday, upcoming } = computeWeekdayTable(localDate);
+  const upcomingLines = upcoming.map((u) => `${u.weekday} = ${u.date}`).join(', ');
+
   return `You organize messy personal planning notes for Timo, a task and calendar app.
 
-"Today" means exactly ${localDate}. The current local time is ${localTime}, in the user's own timezone. Interpret relative phrases ("tomorrow", "tonight", "next Monday", "after work") against this date/time.
+"Today" means exactly ${localDate}, which is a ${todayWeekday}. The current local time is ${localTime}, in the user's own timezone.
 
-Rules:
+Do NOT calculate weekday dates yourself. Use exactly this table for any named weekday mentioned in the text (these are already computed for you and are correct):
+${upcomingLines}
+For example, if the text says "Monday", use the date given for Monday above — never derive it yourself.
+
+DATES:
+- "today" -> ${localDate}. "tomorrow" -> the date immediately after ${localDate}.
+- A named weekday (e.g. "Friday", "next Monday") -> use the table above, exactly.
+- A clearly actionable task with NO day mentioned at all and nothing suggesting it's for later -> use ${localDate} (today). Do this by default for ordinary undated to-dos.
+- Only leave date unset when the text is explicitly vague about timing (e.g. "sometime this week", "eventually", "one of these days", "whenever this week") — vagueness is about explicit hedging language, not simply the absence of a day.
+
+TASK vs EVENT — a stated time does NOT by itself make something an Event. Judge by what KIND of thing it is:
+- Usually a TASK even with a specific time attached: calling/texting someone, sending an email or message, buying or picking up something (including groceries), errands, chores, workouts, studying, submitting something, paying a bill. Example: "Call my dad at 4 PM" is a Task with time=16:00, not an Event.
+- Usually an EVENT: an appointment, a meeting, a reservation/booking, a class, a flight, a scheduled visit, or a lunch/dinner/meetup with someone framed as a fixed engagement (e.g. "lunch with Ahmed at 1:30 on Monday").
+- When genuinely ambiguous, prefer Task — Event should be reserved for things with a real fixed external commitment.
+
+DURATION (estimatedMinutes, tasks only):
+- If the text explicitly states or strongly implies a duration ("for 30 minutes", "for 2 hours", "should take 10 mins", "about an hour", "1h30"), extract it into estimatedMinutes as a number of minutes, and remove that duration phrase from the title (e.g. "read for 30 minutes" -> title "Read", estimatedMinutes 30).
+- Never invent a duration the text didn't state or clearly imply. Leave estimatedMinutes unset otherwise.
+
+PRIORITY — only set explicitly, never invent a priority from neutral wording:
+- High: "urgent", "really important", "high priority", "ASAP", "must do", or clearly equivalent emphatic wording.
+- Low: "not important", "low priority", "no rush", "whenever", "not urgent", or clearly equivalent dismissive wording.
+- If nothing in the text signals urgency either way, leave priority unset (null) — do not default to "medium" just because it seems balanced.
+
+GENERAL:
 - Extract only actionable Tasks and Events/Meetings actually present in the text. Do not invent items that weren't mentioned.
-- Phrases like "I have to X", "I need to X", "I should X", "I have to do X" each introduce an actionable to-do — treat each one as its own separate task, even when several appear together in one sentence.
-- When a sentence lists multiple actionable things separated by commas or "and" (e.g. "clean my room, do my laser session and do my hair"), split it into one suggestion PER item. Do not merge separate items into a single combined title.
-- Do not invent exact dates or times that are not clearly implied. If timing is vague (e.g. "after work", "sometime this week"), leave date/time unset rather than guessing a specific value.
-- If the text says "today" (or gives no day at all for an otherwise clear to-do), use ${localDate} as the date.
-- Preserve the user's own wording for titles where reasonable, tidied into a short actionable phrase (e.g. "do my laser session" -> "Do my laser session").
-- A "task" is a to-do item with no fixed duration commitment. An "event" is something with a specific date, typically a specific time, such as an appointment or meeting.
-- Only use these values: priority is one of low/medium/high; category is one of work/personal/health/errands/learning/other; eventType is one of event/meeting. Use null for any field you are not reasonably confident about — do not guess.
+- Phrases like "I have to X", "I need to X", "I should X" each introduce an actionable to-do — treat each one as its own separate item, even when several appear together in one sentence, and split comma/"and"-separated lists into one suggestion per item. Do not merge separate items into one combined title.
+- Preserve the user's own wording for titles where reasonable, tidied into a short actionable phrase.
+- Only use these values: priority is one of low/medium/high (or null); category is one of work/personal/health/errands/learning/other (or null); eventType is one of event/meeting (or null). Use null for any field you are not reasonably confident about — do not guess.
 - date must be an ISO date "YYYY-MM-DD". time and endTime must be 24-hour "HH:MM". Use null if you are not confident.
 - confidence is a number from 0 to 1 reflecting how clearly the item and its fields were stated.
 - If the text contains no actionable to-do or event at all (e.g. it's just a feeling or observation), return an empty suggestions array — do not force an item to exist.
@@ -219,7 +289,16 @@ const SUGGESTION_JSON_SCHEMA = {
   },
 } as const;
 
-async function callGroq(apiKey: string, text: string, localDate: string, localTime: string) {
+/** Distinguishes an HTTP error response (has a status code) from a network/fetch-level failure. */
+class GroqHttpError extends Error {
+  status: number;
+  constructor(status: number) {
+    super(`GROQ_HTTP_${status}`);
+    this.status = status;
+  }
+}
+
+async function requestGroqOnce(apiKey: string, text: string, localDate: string, localTime: string) {
   const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -247,14 +326,52 @@ async function callGroq(apiKey: string, text: string, localDate: string, localTi
   });
 
   if (!response.ok) {
-    const status = response.status;
-    throw new Error(`GROQ_HTTP_${status}`);
+    throw new GroqHttpError(response.status);
   }
 
   const data = await response.json();
   const rawText: string | undefined = data?.choices?.[0]?.message?.content;
   if (!rawText) throw new Error('GROQ_EMPTY_RESPONSE');
   return rawText;
+}
+
+/**
+ * ROOT CAUSE of the intermittent 502 (investigated, not guessed): this
+ * function previously made exactly one attempt with no retry at all — any
+ * transient Groq-side 5xx or a fetch-level network blip went straight to
+ * `throw`, which the caller turned into an immediate 502 with no second
+ * attempt. That's exactly why pressing "Organize" again with the same
+ * input worked: the retry was the user doing it manually.
+ *
+ * Fix: exactly ONE controlled server-side retry, and only for failures
+ * that are actually transient:
+ *   - a network/fetch-level error (GroqHttpError is NOT thrown for these
+ *     — only a plain Error from fetch() itself failing, e.g. DNS/connection
+ *     reset), or
+ *   - an upstream 5xx from Groq, or
+ *   - a response that came back ok but with no content (GROQ_EMPTY_RESPONSE).
+ * A 4xx (400/401/403/404, and especially 429) is NEVER retried — those
+ * are not transient, and 429 keeps its existing distinct "you're being
+ * rate limited" handling untouched. Malformed model output (a JSON parse
+ * failure after a successful response) is also not retried here — that's
+ * a model-output-quality issue, not a transient provider/network failure.
+ */
+async function callGroq(apiKey: string, text: string, localDate: string, localTime: string) {
+  try {
+    return await requestGroqOnce(apiKey, text, localDate, localTime);
+  } catch (err) {
+    const isTransient =
+      err instanceof GroqHttpError ? err.status >= 500 : err instanceof Error;
+    if (!isTransient) throw err;
+
+    // eslint-disable-next-line no-console
+    console.warn(
+      '[brain-dump] transient provider failure, retrying once',
+      err instanceof Error ? err.message : err,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    return await requestGroqOnce(apiKey, text, localDate, localTime);
+  }
 }
 
 function extractJson(rawText: string): unknown {
