@@ -4,9 +4,11 @@ import Header from '../../components/layout/Header';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import TimoAvatar from '../../components/avatar/TimoAvatar';
-import { useAppState } from '../../state/AppStateContext';
+import { useAppState, type ReminderSelection } from '../../state/AppStateContext';
 import { organizeBrainDump } from '../../lib/brainDumpApi';
 import { isPossibleDuplicate } from '../../lib/brainDumpDuplicates';
+import { computeRemindAt, minutesForPreset } from '../../lib/reminderPresets';
+import { localDateTimeToISOString } from '../../lib/utils';
 import type { BrainDumpSuggestion } from '../../types/brainDump';
 import SuggestionCard from './SuggestionCard';
 import './BrainDumpPage.css';
@@ -16,9 +18,33 @@ type Step = 'input' | 'loading' | 'review' | 'saving' | 'done';
 const PLACEHOLDER =
   "Tomorrow I need to finish the presentation, call Ahmed, buy groceries after work, and I have a dentist appointment at 6.";
 
+/**
+ * Resolves a suggestion's reminder picker value into an actual
+ * ReminderSelection, exactly mirroring AddTaskSheet/AddEventSheet's own
+ * resolveReminder() — a relative preset is computed from the suggestion's
+ * OWN (possibly user-edited) date/time, never frozen at AI-extraction
+ * time; 'invalid' means the picker is set to something that can't
+ * currently be resolved (e.g. a relative preset with no date/time to
+ * count back from).
+ */
+function resolveReminderSelection(suggestion: BrainDumpSuggestion): ReminderSelection | null | 'invalid' {
+  const r = suggestion.reminder;
+  if (r.preset === 'none') return null;
+  if (r.preset === 'custom') {
+    if (!r.customDate || !r.customTime) return 'invalid';
+    return { remindAt: localDateTimeToISOString(r.customDate, r.customTime) };
+  }
+  if (!suggestion.date || !suggestion.time) return 'invalid';
+  const minutes = minutesForPreset(r.preset) ?? 0;
+  return {
+    remindAt: computeRemindAt(suggestion.date, suggestion.time, minutes),
+    offsetMinutes: minutes,
+  };
+}
+
 export default function BrainDumpPage() {
   const navigate = useNavigate();
-  const { tasks, events, addTask, addEvent } = useAppState();
+  const { tasks, events, addTask, addEvent, attachTaskReminder, attachEventReminder } = useAppState();
 
   const [step, setStep] = useState<Step>('input');
   const [text, setText] = useState('');
@@ -82,24 +108,43 @@ export default function BrainDumpPage() {
     setErrorMessage(null);
 
     let succeeded = 0;
+    let reminderFailures = 0;
     const failed: BrainDumpSuggestion[] = [];
 
     for (const suggestion of included) {
+      const resolvedReminder = resolveReminderSelection(suggestion);
+
       try {
+        let createdId: string;
         if (suggestion.type === 'task') {
-          await addTask({
+          const created = await addTask({
             title: suggestion.title,
             description: suggestion.description,
             dueDate: suggestion.date,
             dueTime: suggestion.time,
+            // tasks.priority is NOT NULL at the database level (see
+            // 0001_init.sql: `not null default 'medium' check (priority in
+            // ('low','medium','high'))`) — a real value must always be
+            // stored, there is no way to persist "unset". When the AI/user
+            // left priority unspecified on Review, 'medium' is applied
+            // only here, at the save boundary — the Review UI itself
+            // still shows and preserves "unset" faithfully up to this
+            // point (see SuggestionCard's priority chips), so nothing is
+            // silently misrepresented before the user commits.
             priority: suggestion.priority ?? 'medium',
             category: suggestion.category ?? 'other',
             estimatedMinutes: suggestion.estimatedMinutes,
+            // Reminder is attached separately below via a dedicated
+            // context action, not through this call's own reminder field
+            // — that gives a real per-item Promise to catch AND keeps
+            // AppStateContext's `reminders` state in sync immediately,
+            // rather than only after a refresh.
             reminder: null,
           });
+          createdId = created.id;
         } else {
           if (!suggestion.date) throw new Error('An event needs a date.');
-          await addEvent({
+          const created = await addEvent({
             title: suggestion.title,
             description: suggestion.description,
             eventDate: suggestion.date,
@@ -110,8 +155,32 @@ export default function BrainDumpPage() {
             location: suggestion.location,
             reminder: null,
           });
+          createdId = created.id;
         }
         succeeded++;
+
+        // The Task/Event now exists — from here on, a reminder problem
+        // must NEVER be treated as "retry the whole item" (that would
+        // create a duplicate Task/Event). It's tracked and reported
+        // separately instead. attachTaskReminder/attachEventReminder
+        // throw on failure (unlike the never-throwing applyTaskReminder/
+        // applyEventReminder used internally by addTask/addEvent) and
+        // update AppStateContext's `reminders` state themselves on
+        // success, so a saved reminder is visible in the running app
+        // immediately — no refresh needed.
+        if (resolvedReminder === 'invalid') {
+          reminderFailures++;
+        } else if (resolvedReminder) {
+          try {
+            if (suggestion.type === 'task') {
+              await attachTaskReminder(createdId, resolvedReminder);
+            } else {
+              await attachEventReminder(createdId, resolvedReminder);
+            }
+          } catch {
+            reminderFailures++;
+          }
+        }
       } catch {
         failed.push(suggestion);
       }
@@ -123,8 +192,16 @@ export default function BrainDumpPage() {
     const excluded = suggestions.filter((s) => !s.included);
     setSuggestions([...failed, ...excluded]);
 
-    if (failed.length === 0) {
+    if (failed.length === 0 && reminderFailures === 0) {
       setResultMessage(`${succeeded} item${succeeded === 1 ? '' : 's'} added to Timo`);
+      setStep('done');
+    } else if (failed.length === 0 && reminderFailures > 0) {
+      // The items themselves are safely created — only surface the
+      // reminder shortfall, and do NOT send the user back to Review
+      // (that would risk them re-adding an already-created item).
+      setResultMessage(
+        `${succeeded} item${succeeded === 1 ? '' : 's'} added, but ${reminderFailures} reminder${reminderFailures === 1 ? '' : 's'} couldn't be saved.`,
+      );
       setStep('done');
     } else if (succeeded > 0) {
       setErrorMessage(

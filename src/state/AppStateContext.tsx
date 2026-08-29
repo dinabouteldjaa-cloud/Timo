@@ -91,7 +91,7 @@ interface AppStateValue {
   tasks: Task[];
   tasksLoading: boolean;
   tasksError: string | null;
-  addTask: (input: NewTaskInput) => Promise<void>;
+  addTask: (input: NewTaskInput) => Promise<Task>;
   updateTask: (id: string, input: NewTaskInput) => Promise<void>;
   toggleTask: (id: string) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
@@ -104,16 +104,20 @@ interface AppStateValue {
   eventsLoading: boolean;
   eventsError: string | null;
   upcomingEvent: CalendarEvent | null;
-  addEvent: (input: NewEventInput) => Promise<void>;
+  addEvent: (input: NewEventInput) => Promise<CalendarEvent>;
   updateEvent: (id: string, input: NewEventInput) => Promise<void>;
   deleteEvent: (id: string) => Promise<void>;
 
-  // Read-only: reminders are only ever mutated via the task/event calls
-  // above. Consumers look up `reminders.find(r => r.taskId === task.id)`
-  // etc. to know whether an item has a reminder and what it is.
+  // Read-only: reminders are normally mutated only via the task/event
+  // calls above. attachTaskReminder/attachEventReminder below are the one
+  // exception — a narrow, throwing action for a caller that creates a
+  // task/event first and attaches a reminder as a separate, precisely
+  // trackable step (currently Brain Dump).
   reminders: Reminder[];
   remindersLoading: boolean;
   remindersError: string | null;
+  attachTaskReminder: (taskId: string, reminder: ReminderSelection) => Promise<Reminder>;
+  attachEventReminder: (eventId: string, reminder: ReminderSelection) => Promise<Reminder>;
 
   focusSession: FocusSessionState;
   focusHistory: FocusSessionRecord[];
@@ -220,6 +224,39 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     [userId],
   );
 
+  /**
+   * Attaches a reminder to an ALREADY-CREATED task. Unlike applyTaskReminder
+   * above (used by the Add/Edit Task sheet, which never throws so a
+   * reminder failure can't undo a just-saved task in that single combined
+   * flow), this DOES throw on failure and keeps the local `reminders`
+   * state in sync itself. It exists for callers — currently Brain Dump —
+   * that create a task first, then attach a reminder as a distinct step,
+   * and need a real rejected Promise to detect that specific failure
+   * precisely (the shared remindersError string above isn't reliable for
+   * that: a later item's success can overwrite an earlier item's failure
+   * before the caller ever reads it).
+   */
+  const attachTaskReminder = useCallback(
+    async (taskId: string, reminder: ReminderSelection) => {
+      if (!userId) throw new Error('Not signed in.');
+      const saved = await remindersApi.upsertReminderForTask(userId, taskId, reminder);
+      setReminders((prev) => [...prev.filter((r) => r.taskId !== taskId), saved]);
+      return saved;
+    },
+    [userId],
+  );
+
+  /** Attaches a reminder to an already-created event. See attachTaskReminder. */
+  const attachEventReminder = useCallback(
+    async (eventId: string, reminder: ReminderSelection) => {
+      if (!userId) throw new Error('Not signed in.');
+      const saved = await remindersApi.upsertReminderForEvent(userId, eventId, reminder);
+      setReminders((prev) => [...prev.filter((r) => r.eventId !== eventId), saved]);
+      return saved;
+    },
+    [userId],
+  );
+
   // --- Tasks ------------------------------------------------------------
   const [tasks, setTasks] = useState<Task[]>([]);
   const [tasksLoading, setTasksLoading] = useState(false);
@@ -255,12 +292,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const addTask = useCallback(
     async (input: NewTaskInput) => {
-      if (!userId) return;
+      if (!userId) throw new Error('Not signed in.');
       setTasksError(null);
       try {
         const created = await tasksApi.createTask(userId, input);
         setTasks((prev) => [created, ...prev]);
         await applyTaskReminder(created.id, input.reminder);
+        return created;
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('[AppState] addTask failed', err);
@@ -385,12 +423,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const addEvent = useCallback(
     async (input: NewEventInput) => {
-      if (!userId) return;
+      if (!userId) throw new Error('Not signed in.');
       setEventsError(null);
       try {
         const created = await eventsApi.createEvent(userId, input);
         setEvents((prev) => [...prev, created]);
         await applyEventReminder(created.id, input.reminder);
+        return created;
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('[AppState] addEvent failed', err);
@@ -693,6 +732,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       reminders,
       remindersLoading,
       remindersError,
+      attachTaskReminder,
+      attachEventReminder,
       focusSession,
       focusHistory,
       focusHistoryLoading,
@@ -724,6 +765,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       reminders,
       remindersLoading,
       remindersError,
+      attachTaskReminder,
+      attachEventReminder,
       focusSession,
       focusHistory,
       focusHistoryLoading,

@@ -1,5 +1,6 @@
 import Checkbox from '../../components/ui/Checkbox';
 import Badge from '../../components/ui/Badge';
+import ReminderPicker from '../../components/ui/ReminderPicker';
 import type { BrainDumpSuggestion } from '../../types/brainDump';
 import type { CalendarEventType, TaskCategory, TaskPriority } from '../../types/task';
 import './SuggestionCard.css';
@@ -96,6 +97,14 @@ export default function SuggestionCard({ suggestion, onChange, onRemove }: Sugge
         <p className="suggestion-card__hint">Add a date to include this event.</p>
       )}
 
+      <ReminderPicker
+        value={suggestion.reminder}
+        onChange={(reminder) => onChange({ reminder })}
+        parentDate={suggestion.date}
+        parentTime={suggestion.time}
+        atLabel={isEvent ? 'At start time' : 'At time'}
+      />
+
       {!isEvent && (
         <>
           <label className="suggestion-card__field">
@@ -128,6 +137,11 @@ export default function SuggestionCard({ suggestion, onChange, onRemove }: Sugge
                 </button>
               ))}
             </div>
+            {!suggestion.priority && (
+              <p className="suggestion-card__hint suggestion-card__hint--neutral">
+                No priority set — will save as Medium.
+              </p>
+            )}
           </div>
           <div className="suggestion-card__field">
             <span className="suggestion-card__label">Category</span>

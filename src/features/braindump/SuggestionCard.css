@@ -97,6 +97,13 @@
   color: var(--color-error);
 }
 
+.suggestion-card__hint--neutral {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
 .suggestion-card__chip-row {
   display: flex;
   gap: 6px;
