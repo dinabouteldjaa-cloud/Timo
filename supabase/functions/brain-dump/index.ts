@@ -273,13 +273,18 @@ DATES:
 - Only leave date unset when the text is explicitly vague about timing (e.g. "sometime this week", "eventually", "one of these days", "whenever this week") — vagueness is about explicit hedging language, not simply the absence of a day.
 
 DATE SCOPE ACROSS COORDINATED ACTIONS — this takes priority over the "no day mentioned -> today" default above:
-- When a clause states an explicit date/day (e.g. "Tomorrow ...", "On Monday ..."), that date applies to every coordinated actionable item introduced in that same breath — items joined by "and", "then", or commas — until a NEW explicit date/day appears later in the text. An item covered this way DOES have a day (inherited), so it is not "no day mentioned".
+- When an explicit date/day appears anywhere in the FIRST actionable item of a coordinated clause — whether BEFORE it ("Tomorrow buy toothpaste...", "On Monday read...") or trailing it ("Study French Monday...", "Call Ahmed tomorrow...") — that same date applies to every coordinated actionable item introduced in that same breath — items joined by "and", "then", or commas — until a NEW explicit date/day appears later in the text. An item covered this way DOES have a day (inherited), so it is not "no day mentioned".
 - Do NOT inherit time, duration, priority, or location across coordinated items this way — each of those only applies to the specific item it was actually stated for.
 - Examples:
   "Tomorrow buy toothpaste and get a haircut" -> both items tomorrow.
   "On Monday read for 30 minutes and study French for 2 hours" -> both Monday; each keeps its own separate duration, not the other's.
   "Tomorrow call the bank at 10 AM and send the report" -> both items tomorrow; ONLY "call the bank" gets 10 AM.
   "Tomorrow call Sarah and send invoice. Friday meet Ahmed." -> the first two are tomorrow; "meet Ahmed" is Friday because that new explicit date resets the inherited scope.
+  "Study French Monday and buy groceries." -> the date trails the first item here, not leads it — both items are still Monday.
+  "Call Ahmed tomorrow and send the invoice." -> both items tomorrow, for the same reason.
+  "Buy groceries Friday, clean the apartment, and call Sarah." -> all three items are Friday.
+  "Study French Monday and buy groceries Tuesday." -> "buy groceries" has its OWN explicit date (Tuesday), so it does NOT inherit Monday — study French is Monday, buy groceries is Tuesday.
+  "Study French Monday and buy groceries. Dentist appointment Friday." -> the first two are Monday; the dentist appointment is Friday because that new explicit date resets the inherited scope.
 
 REMINDER INTENT — only when the text explicitly asks to be reminded or not forget something. A stated date/time on its own is NEVER enough to add a reminder:
 - Trigger phrases include "remind me...", "don't let me forget...", "make sure I remember...", or clearly equivalent explicit requests. Ordinary timed tasks/events with no such wording get reminder: null.
