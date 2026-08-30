@@ -5,11 +5,10 @@
   padding: var(--space-1) var(--space-5) var(--space-6);
 }
 
-/* Timo mascot card — image slot (left) + text (right). The image slot
-   currently renders the existing TimoAvatar placeholder; swap in a real
-   asset later (e.g. src/assets/timo/timo-greeting.png) by replacing
-   TimoAvatar inside .today-mascot__image with an <img>, no other
-   structural changes needed. */
+/* Timo mascot card — image slot (left) + text (right). Renders the real
+   Timo artwork via TimoMascot (src/components/ui/TimoMascot.tsx), sized
+   to a fixed box with object-fit: contain so differently-sized source
+   PNGs never stretch or get cropped. */
 .today-mascot {
   display: flex;
   align-items: center;
@@ -19,6 +18,8 @@
 
 .today-mascot__image {
   flex-shrink: 0;
+  width: 72px;
+  height: 72px;
   display: flex;
   align-items: center;
   justify-content: center;

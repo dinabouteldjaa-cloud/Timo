@@ -5,14 +5,60 @@ import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import ProgressBar from '../../components/ui/ProgressBar';
 import TaskRow from '../../components/ui/TaskRow';
-import TimoAvatar from '../../components/avatar/TimoAvatar';
+import TimoMascot, { type TimoMascotVariant } from '../../components/ui/TimoMascot';
 import { useLocale, formatString } from '../../i18n/LocaleContext';
-import { getGreetingKey, formatFriendlyDate } from '../../lib/utils';
+import { getGreetingKey, formatFriendlyDate, toISODate } from '../../lib/utils';
 import { useAppState } from '../../state/AppStateContext';
 import AddTaskSheet from '../tasks/AddTaskSheet';
 import TaskDetailsSheet from '../tasks/TaskDetailsSheet';
 import type { Task } from '../../types/task';
 import './TodayPage.css';
+
+// Only these four variants are used on Today for now — thinking/concerned/
+// resting have no clean existing state to map to here yet, per instructions.
+type TodayMascotVariant = Extract<TimoMascotVariant, 'greeting' | 'happy' | 'motivating' | 'celebrating'>;
+
+const TODAY_MASCOT_MESSAGES: Record<TodayMascotVariant, string> = {
+  greeting: "Let's make today feel manageable.",
+  happy: 'Nice progress. Keep it going.',
+  motivating: "One task at a time. You've got this.",
+  celebrating: "You did it. Today's tasks are done!",
+};
+
+/**
+ * Whether a task belongs to the user's current LOCAL day — the same
+ * "is this scheduled for today" semantics TaskRow already uses
+ * (scheduledDate compared via toISODate(new Date()), no UTC/timestamp
+ * comparisons that could roll over at a timezone boundary).
+ *
+ * Priority, per the existing Plan My Day / scheduling model:
+ *   1. scheduledDate, if set — an explicit Plan My Day placement always
+ *      wins and decides membership outright (even if it's for another
+ *      day, in which case this task is NOT part of today).
+ *   2. otherwise dueDate, if set — the task's deadline.
+ *   3. otherwise (no scheduledDate and no dueDate at all) — the task
+ *      isn't tied to any particular day, so it isn't "future" or "past"
+ *      either; it stays part of Today, matching the app's original
+ *      behavior of always surfacing dateless tasks there.
+ */
+function isTodayRelevantTask(task: Task, todayISO: string): boolean {
+  if (task.scheduledDate) return task.scheduledDate === todayISO;
+  if (task.dueDate) return task.dueDate === todayISO;
+  return true;
+}
+
+/**
+ * Deterministic, local-only — no AI. Operates on todayRelevantTasks (see
+ * isTodayRelevantTask), never the user's full task history, so a task due
+ * yesterday or scheduled for next week can never change what Timo says
+ * today.
+ */
+function getTodayMascotVariant(total: number, completed: number): TodayMascotVariant {
+  if (total > 0 && completed === total) return 'celebrating';
+  if (completed > 0) return 'happy';
+  if (total - completed >= 3) return 'motivating';
+  return 'greeting';
+}
 
 export default function TodayPage() {
   const { t, locale } = useLocale();
@@ -39,9 +85,23 @@ export default function TodayPage() {
   const greeting = t.today[getGreetingKey()];
   const dateLabel = useMemo(() => formatFriendlyDate(locale), [locale]);
 
-  const todaysTasks = tasks.filter((task) => task.status !== 'completed').slice(0, 4);
-  const completed = tasks.filter((task) => task.status === 'completed').length;
-  const progressPct = tasks.length === 0 ? 0 : (completed / tasks.length) * 100;
+  // Every Today-scoped number below (display list, counts, progress,
+  // mascot) is derived from this SAME set, so they can never disagree
+  // with each other, and none of them can be swayed by a task due
+  // yesterday or scheduled for some other day.
+  const todayISO = toISODate(new Date());
+  const todayRelevantTasks = tasks.filter((task) => isTodayRelevantTask(task, todayISO));
+
+  const todaysTasks = todayRelevantTasks.filter((task) => task.status !== 'completed').slice(0, 4);
+  // Completed today-relevant tasks still count here even though the list
+  // above only ever displays incomplete ones — progress/mascot need the
+  // full today-relevant set, not just what's currently visible.
+  const completed = todayRelevantTasks.filter((task) => task.status === 'completed').length;
+  const progressPct =
+    todayRelevantTasks.length === 0 ? 0 : (completed / todayRelevantTasks.length) * 100;
+
+  const mascotVariant = getTodayMascotVariant(todayRelevantTasks.length, completed);
+  const mascotMessage = TODAY_MASCOT_MESSAGES[mascotVariant];
 
   const taskIdsWithReminder = new Set(
     reminders.filter((r) => r.taskId).map((r) => r.taskId as string),
@@ -94,16 +154,14 @@ export default function TodayPage() {
       <Header title={greeting} subtitle={dateLabel} />
 
       <div className="today-page">
-        {/* Timo mascot card — image slot on the left is ready for a real
-            asset (e.g. src/assets/timo/timo-greeting.png) later; using the
-            existing TimoAvatar placeholder for now. */}
+        {/* Timo mascot card — real artwork, mascot on left, text on right. */}
         <Card className="today-mascot" padding="md">
           <div className="today-mascot__image">
-            <TimoAvatar state="greeting" size="lg" />
+            <TimoMascot variant={mascotVariant} />
           </div>
           <div className="today-mascot__text">
             <p className="today-mascot__name">Timo</p>
-            <p className="today-mascot__message">{t.today.timoMessage}</p>
+            <p className="today-mascot__message">{mascotMessage}</p>
           </div>
         </Card>
 
@@ -111,7 +169,7 @@ export default function TodayPage() {
         <Card padding="sm">
           <div className="today-summary__row">
             <span className="today-summary__label">
-              {formatString(t.today.tasksCompleted, { completed, total: tasks.length })}
+              {formatString(t.today.tasksCompleted, { completed, total: todayRelevantTasks.length })}
             </span>
             <span className="today-summary__pct">{Math.round(progressPct)}%</span>
           </div>
