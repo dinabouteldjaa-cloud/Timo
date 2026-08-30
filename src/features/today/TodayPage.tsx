@@ -10,6 +10,8 @@ import { useLocale, formatString } from '../../i18n/LocaleContext';
 import { getGreetingKey, formatFriendlyDate } from '../../lib/utils';
 import { useAppState } from '../../state/AppStateContext';
 import AddTaskSheet from '../tasks/AddTaskSheet';
+import TaskDetailsSheet from '../tasks/TaskDetailsSheet';
+import type { Task } from '../../types/task';
 import './TodayPage.css';
 
 export default function TodayPage() {
@@ -20,13 +22,19 @@ export default function TodayPage() {
     tasksLoading,
     toggleTask,
     addTask,
+    updateTask,
+    deleteTask,
     eventsLoading,
     upcomingEvent,
     reminders,
     focusSession,
     todayFocusSummary,
+    selectFocusTask,
   } = useAppState();
-  const [quickAddOpen, setQuickAddOpen] = useState(false);
+
+  const [taskSheetOpen, setTaskSheetOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [detailsTask, setDetailsTask] = useState<Task | null>(null);
 
   const greeting = t.today[getGreetingKey()];
   const dateLabel = useMemo(() => formatFriendlyDate(locale), [locale]);
@@ -43,22 +51,64 @@ export default function TodayPage() {
   const todayFocusMinutes = Math.round(todayFocusSummary.secondsToday / 60);
   const hasFocusHistoryToday = !focusIsActive && todayFocusSummary.sessionsToday > 0;
 
+  const focusSubtitle = focusIsActive
+    ? 'In progress — tap to resume'
+    : hasFocusHistoryToday
+      ? `${todayFocusMinutes} min · ${todayFocusSummary.sessionsToday} session${todayFocusSummary.sessionsToday === 1 ? '' : 's'} today`
+      : 'Start a deep work session';
+
+  function openQuickAdd() {
+    setEditingTask(null);
+    setTaskSheetOpen(true);
+  }
+
+  function openTaskDetails(task: Task) {
+    setDetailsTask(task);
+  }
+
+  function closeTaskDetails() {
+    setDetailsTask(null);
+  }
+
+  function editTaskFromDetails() {
+    if (!detailsTask) return;
+    setEditingTask(detailsTask);
+    setDetailsTask(null);
+    setTaskSheetOpen(true);
+  }
+
+  function startFocusFromDetails() {
+    if (!detailsTask) return;
+    selectFocusTask(detailsTask.id);
+    setDetailsTask(null);
+    navigate('/focus');
+  }
+
+  function closeTaskSheet() {
+    setTaskSheetOpen(false);
+    setEditingTask(null);
+  }
+
   return (
     <>
       <Header title={greeting} subtitle={dateLabel} />
 
       <div className="today-page">
-        {/* Timo hero */}
-        <Card className="today-hero" padding="lg">
-          <TimoAvatar state="greeting" size="lg" />
-          <div className="today-hero__text">
-            <p className="today-hero__name">Timo</p>
-            <p className="today-hero__message">{t.today.timoMessage}</p>
+        {/* Timo mascot card — image slot on the left is ready for a real
+            asset (e.g. src/assets/timo/timo-greeting.png) later; using the
+            existing TimoAvatar placeholder for now. */}
+        <Card className="today-mascot" padding="md">
+          <div className="today-mascot__image">
+            <TimoAvatar state="greeting" size="lg" />
+          </div>
+          <div className="today-mascot__text">
+            <p className="today-mascot__name">Timo</p>
+            <p className="today-mascot__message">{t.today.timoMessage}</p>
           </div>
         </Card>
 
-        {/* Daily summary */}
-        <Card padding="md">
+        {/* Daily progress */}
+        <Card padding="sm">
           <div className="today-summary__row">
             <span className="today-summary__label">
               {formatString(t.today.tasksCompleted, { completed, total: tasks.length })}
@@ -73,61 +123,44 @@ export default function TodayPage() {
           ✨ {t.today.planMyDay}
         </Button>
 
-        {/* Brain Dump — AI-assisted capture, review before anything is created */}
-        <button className="today-braindump-card" onClick={() => navigate('/brain-dump')}>
-          <span className="today-braindump-card__icon">🧠</span>
-          <span className="today-braindump-card__text">
-            <span className="today-braindump-card__title">Brain Dump</span>
-            <span className="today-braindump-card__subtitle">Tell Timo everything on your mind</span>
-          </span>
-        </button>
+        {/* Quick actions: Brain Dump + Focus, as a compact balanced pair */}
+        <div className="today-quick-actions">
+          <button className="today-quick-action" onClick={() => navigate('/brain-dump')}>
+            <span className="today-quick-action__icon">🧠</span>
+            <span className="today-quick-action__title">Brain Dump</span>
+            <span className="today-quick-action__subtitle">Capture what's on your mind</span>
+          </button>
+          <button className="today-quick-action" onClick={() => navigate('/focus')}>
+            <span className="today-quick-action__icon">🎯</span>
+            <span className="today-quick-action__title">{focusIsActive ? 'Resume Focus' : 'Start Focus'}</span>
+            <span className="today-quick-action__subtitle">{focusSubtitle}</span>
+          </button>
+        </div>
 
         {/* Up next */}
-        <Card padding="md">
+        <div>
           <p className="today-section-label">{t.today.upNext}</p>
           {eventsLoading ? (
-            <p className="today-empty">Loading…</p>
+            <p className="today-upnext-compact">Loading…</p>
           ) : upcomingEvent ? (
-            <div className="today-upnext">
-              <div className="today-upnext__time">
-                <span>{upcomingEvent.allDay ? 'All day' : upcomingEvent.startTime ?? ''}</span>
+            <Card padding="sm">
+              <div className="today-upnext">
+                <div className="today-upnext__time">
+                  <span>{upcomingEvent.allDay ? 'All day' : upcomingEvent.startTime ?? ''}</span>
+                </div>
+                <div className="today-upnext__divider" />
+                <div className="today-upnext__body">
+                  <p className="today-upnext__title">{upcomingEvent.title}</p>
+                  {upcomingEvent.location && (
+                    <p className="today-upnext__location">{upcomingEvent.location}</p>
+                  )}
+                </div>
               </div>
-              <div className="today-upnext__divider" />
-              <div className="today-upnext__body">
-                <p className="today-upnext__title">{upcomingEvent.title}</p>
-                {upcomingEvent.location && (
-                  <p className="today-upnext__location">{upcomingEvent.location}</p>
-                )}
-              </div>
-            </div>
+            </Card>
           ) : (
-            <p className="today-empty">Nothing coming up on your calendar.</p>
+            <p className="today-upnext-compact">Nothing coming up on your calendar.</p>
           )}
-        </Card>
-
-        {/* Focus suggestion */}
-        <Card padding="md" className="today-focus-card">
-          <div className="today-focus-card__row">
-            <div>
-              {hasFocusHistoryToday ? (
-                <>
-                  <p className="today-focus-card__title">Today's Focus</p>
-                  <p className="today-focus-card__stats">
-                    {todayFocusMinutes} min · {todayFocusSummary.sessionsToday} session
-                    {todayFocusSummary.sessionsToday === 1 ? '' : 's'}
-                  </p>
-                </>
-              ) : (
-                <p className="today-section-label">
-                  {focusIsActive ? 'Focus session in progress' : t.today.focusAvailable}
-                </p>
-              )}
-            </div>
-            <Button variant="secondary" size="sm" onClick={() => navigate('/focus')}>
-              {focusIsActive ? 'Resume' : t.today.startFocus}
-            </Button>
-          </div>
-        </Card>
+        </div>
 
         {/* Today's tasks */}
         <div>
@@ -148,6 +181,7 @@ export default function TodayPage() {
                   key={task.id}
                   task={task}
                   onToggle={toggleTask}
+                  onOpen={openTaskDetails}
                   hasReminder={taskIdsWithReminder.has(task.id)}
                 />
               ))
@@ -156,18 +190,48 @@ export default function TodayPage() {
         </div>
 
         {/* Quick add */}
-        <button className="today-quick-add" onClick={() => setQuickAddOpen(true)}>
+        <button className="today-quick-add" onClick={openQuickAdd}>
           <span className="today-quick-add__icon">+</span>
           {t.today.quickAdd}
         </button>
       </div>
 
       <AddTaskSheet
-        open={quickAddOpen}
-        onClose={() => setQuickAddOpen(false)}
+        open={taskSheetOpen}
+        task={editingTask}
+        existingReminder={
+          editingTask ? reminders.find((r) => r.taskId === editingTask.id) ?? null : null
+        }
+        onClose={closeTaskSheet}
         onSave={async (input) => {
-          await addTask(input);
-          setQuickAddOpen(false);
+          if (editingTask) {
+            await updateTask(editingTask.id, input);
+          } else {
+            await addTask(input);
+          }
+          closeTaskSheet();
+        }}
+        onDelete={
+          editingTask
+            ? async () => {
+                await deleteTask(editingTask.id);
+                closeTaskSheet();
+              }
+            : undefined
+        }
+      />
+
+      <TaskDetailsSheet
+        open={Boolean(detailsTask)}
+        task={detailsTask}
+        reminder={detailsTask ? reminders.find((r) => r.taskId === detailsTask.id) ?? null : null}
+        onClose={closeTaskDetails}
+        onEdit={editTaskFromDetails}
+        onStartFocus={startFocusFromDetails}
+        onDelete={async () => {
+          if (!detailsTask) return;
+          await deleteTask(detailsTask.id);
+          closeTaskDetails();
         }}
       />
     </>

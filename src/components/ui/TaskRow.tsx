@@ -1,3 +1,4 @@
+import type { KeyboardEvent } from 'react';
 import type { Task } from '../../types/task';
 import { useLocale } from '../../i18n/LocaleContext';
 import { formatDuration, toISODate } from '../../lib/utils';
@@ -22,15 +23,54 @@ export default function TaskRow({ task, onToggle, onOpen, hasReminder }: TaskRow
     task.scheduledDate === toISODate(new Date()) &&
     Boolean(task.scheduledStartTime && task.scheduledEndTime);
 
+  // Built as a list and joined with a single separator, so metadata always
+  // reads naturally (e.g. "19:00 • Personal" or "1h 20m • Work") — no
+  // dangling/standalone separators appear when a field is missing.
+  const metaParts: string[] = [];
+  if (isScheduledToday) {
+    metaParts.push(`${task.scheduledStartTime}–${task.scheduledEndTime}`);
+  } else if (task.dueTime) {
+    metaParts.push(task.dueTime);
+  }
+  if (task.estimatedMinutes) {
+    metaParts.push(formatDuration(task.estimatedMinutes, t));
+  }
+  metaParts.push(t.category[task.category]);
+
+  function handleOpen() {
+    onOpen?.(task);
+  }
+
+  function handleKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    if (!onOpen) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      handleOpen();
+    }
+  }
+
   return (
-    <div className={`task-row ${done ? 'task-row--done' : ''}`}>
-      <Checkbox checked={done} onChange={() => onToggle?.(task.id)} aria-label={task.title} />
+    <div
+      className={`task-row ${done ? 'task-row--done' : ''} ${onOpen ? 'task-row--clickable' : ''}`}
+      onClick={handleOpen}
+      onKeyDown={handleKeyDown}
+      role={onOpen ? 'button' : undefined}
+      tabIndex={onOpen ? 0 : undefined}
+    >
+      {/* This wrapper is a plain <div>, not a <button> — it exists only to
+          stop the checkbox's click/keyboard activation from also bubbling
+          up and opening details. The Checkbox itself is a real <button>
+          rendered as a child of this div, which is valid HTML; only a
+          literal <button> nested inside another <button> would be invalid,
+          and the outer row here is a div with role="button", not one. */}
       <div
-        className={`task-row__body ${onOpen ? 'task-row__body--clickable' : ''}`}
-        onClick={() => onOpen?.(task)}
-        role={onOpen ? 'button' : undefined}
-        tabIndex={onOpen ? 0 : undefined}
+        className="task-row__checkbox-wrap"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
       >
+        <Checkbox checked={done} onChange={() => onToggle?.(task.id)} aria-label={task.title} />
+      </div>
+      <div className="task-row__body">
         <p className="task-row__title">
           {task.title}
           {hasReminder && (
@@ -52,19 +92,7 @@ export default function TaskRow({ task, onToggle, onOpen, hasReminder }: TaskRow
             </svg>
           )}
         </p>
-        <div className="task-row__meta">
-          {isScheduledToday ? (
-            <span className="task-row__time">
-              {task.scheduledStartTime}–{task.scheduledEndTime}
-            </span>
-          ) : (
-            task.dueTime && <span className="task-row__time">{task.dueTime}</span>
-          )}
-          {task.estimatedMinutes && (
-            <span className="task-row__duration">{formatDuration(task.estimatedMinutes, t)}</span>
-          )}
-          <Badge tone={task.category === 'work' ? 'primary' : 'neutral'}>{t.category[task.category]}</Badge>
-        </div>
+        <p className="task-row__meta">{metaParts.join(' • ')}</p>
       </div>
       <Badge tone={task.priority}>{t.priority[task.priority]}</Badge>
     </div>

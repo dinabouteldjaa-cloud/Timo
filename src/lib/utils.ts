@@ -52,7 +52,7 @@ export function formatDuration(minutes: number, t: Strings) {
   if (minutes < 60) return `${minutes} ${t.common.minutes}`;
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
-  return rest === 0 ? `${hours}h` : `${hours}h${rest}`;
+  return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
 }
 
 /**

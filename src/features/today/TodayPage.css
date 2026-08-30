@@ -1,39 +1,56 @@
 .today-page {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
-  padding: var(--space-2) var(--space-5) var(--space-6);
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-5) var(--space-6);
 }
 
-.today-hero {
+/* Timo mascot card — image slot (left) + text (right). The image slot
+   currently renders the existing TimoAvatar placeholder; swap in a real
+   asset later (e.g. src/assets/timo/timo-greeting.png) by replacing
+   TimoAvatar inside .today-mascot__image with an <img>, no other
+   structural changes needed. */
+.today-mascot {
   display: flex;
   align-items: center;
-  gap: var(--space-4);
+  gap: var(--space-3);
   background: linear-gradient(135deg, var(--color-primary-soft), var(--color-surface) 70%);
 }
 
-.today-hero__name {
+.today-mascot__image {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.today-mascot__text {
+  min-width: 0;
+}
+
+.today-mascot__name {
   margin: 0 0 2px;
   font-weight: 800;
-  font-size: 16px;
+  font-size: 15px;
   color: var(--color-primary-dark);
 }
 
-.today-hero__message {
+.today-mascot__message {
   margin: 0;
-  font-size: 13.5px;
+  font-size: 13px;
   color: var(--color-text-muted);
+  line-height: 1.35;
 }
 
 .today-summary__row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: var(--space-3);
+  margin-bottom: var(--space-2);
 }
 
 .today-summary__label {
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
   color: var(--color-text);
 }
@@ -101,38 +118,12 @@
   color: var(--color-text-muted);
 }
 
-.today-focus-card {
-  background: var(--color-surface-alt);
-  border: none;
-}
-
-.today-focus-card__row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
-.today-focus-card .today-section-label {
+/* Compact single-line state for Up Next when loading/empty — deliberately
+   NOT a full padded card, so an empty day doesn't cost much vertical space. */
+.today-upnext-compact {
   margin: 0;
-  text-transform: none;
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--color-text);
-  letter-spacing: 0;
-}
-
-.today-focus-card__title {
-  margin: 0 0 2px;
-  font-size: 13.5px;
-  font-weight: 700;
-  color: var(--color-text);
-}
-
-.today-focus-card__stats {
-  margin: 0;
-  font-size: 12.5px;
-  font-weight: 500;
+  padding: var(--space-1) var(--space-1) 0;
+  font-size: 13px;
   color: var(--color-text-muted);
 }
 
@@ -176,44 +167,48 @@
   font-weight: 800;
 }
 
-.today-braindump-card {
-  display: flex;
-  align-items: center;
+/* Quick actions: Brain Dump + Focus as a balanced two-up grid rather than
+   two separate full-width sections. */
+.today-quick-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: var(--space-3);
-  width: 100%;
+}
+
+.today-quick-action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
   border: none;
   background: linear-gradient(135deg, var(--color-primary-soft), var(--color-surface-alt));
   border-radius: var(--radius-lg);
-  padding: var(--space-4);
+  padding: var(--space-3) var(--space-3) var(--space-4);
   cursor: pointer;
   text-align: left;
+  min-width: 0;
 }
 
-.today-braindump-card__icon {
-  width: 40px;
-  height: 40px;
+.today-quick-action__icon {
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   background: var(--color-surface);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
-  flex-shrink: 0;
+  font-size: 16px;
+  margin-bottom: var(--space-1);
 }
 
-.today-braindump-card__text {
-  display: flex;
-  flex-direction: column;
-}
-
-.today-braindump-card__title {
-  font-size: 14.5px;
+.today-quick-action__title {
+  font-size: 13.5px;
   font-weight: 700;
   color: var(--color-text);
 }
 
-.today-braindump-card__subtitle {
-  font-size: 12.5px;
+.today-quick-action__subtitle {
+  font-size: 11.5px;
   color: var(--color-text-muted);
-  margin-top: 1px;
+  line-height: 1.3;
 }
