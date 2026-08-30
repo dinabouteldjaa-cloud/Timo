@@ -9,6 +9,7 @@ import { organizeBrainDump } from '../../lib/brainDumpApi';
 import { isPossibleDuplicate } from '../../lib/brainDumpDuplicates';
 import { computeRemindAt, minutesForPreset } from '../../lib/reminderPresets';
 import { localDateTimeToISOString } from '../../lib/utils';
+import { useSpeechRecognition } from '../../hooks/useSpeechRecognition';
 import type { BrainDumpSuggestion } from '../../types/brainDump';
 import SuggestionCard from './SuggestionCard';
 import './BrainDumpPage.css';
@@ -53,6 +54,26 @@ export default function BrainDumpPage() {
   const [resultMessage, setResultMessage] = useState<string | null>(null);
 
   const includedCount = suggestions.filter((s) => s.included).length;
+
+  const speech = useSpeechRecognition({
+    onFinalTranscript: (finalText) => {
+      // Never trim or otherwise rewrite what's already there — preserve
+      // the user's existing text (including any formatting/line breaks)
+      // exactly, and only decide whether a separating space is needed.
+      setText((prev) => {
+        if (!prev) return finalText;
+        return /\s$/.test(prev) ? `${prev}${finalText}` : `${prev} ${finalText}`;
+      });
+    },
+  });
+
+  function handleMicClick() {
+    if (speech.status === 'listening') {
+      speech.stop();
+    } else {
+      speech.start();
+    }
+  }
 
   function handleBack() {
     navigate('/');
@@ -237,14 +258,57 @@ export default function BrainDumpPage() {
               </p>
             </Card>
 
-            <textarea
-              className="brain-dump-textarea"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder={PLACEHOLDER}
-              rows={8}
-              maxLength={4000}
-            />
+            <div className="brain-dump-textarea-wrap">
+              <textarea
+                className="brain-dump-textarea"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder={PLACEHOLDER}
+                rows={8}
+                maxLength={4000}
+              />
+              {speech.isSupported && (
+                <button
+                  type="button"
+                  className={`brain-dump-mic-button ${speech.status === 'listening' ? 'brain-dump-mic-button--active' : ''}`}
+                  onClick={handleMicClick}
+                  aria-label={speech.status === 'listening' ? 'Stop voice input' : 'Start voice input'}
+                >
+                  {speech.status === 'listening' ? (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                      <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" />
+                    </svg>
+                  ) : (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                      <path
+                        d="M12 15a3 3 0 003-3V6a3 3 0 10-6 0v6a3 3 0 003 3z"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                      />
+                      <path
+                        d="M19 11a7 7 0 01-14 0M12 18v3"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  )}
+                </button>
+              )}
+            </div>
+
+            {speech.status === 'listening' && (
+              <p className="brain-dump-voice-status">
+                <span className="brain-dump-voice-pulse" aria-hidden="true" />
+                Listening… {speech.interimTranscript}
+              </p>
+            )}
+
+            {!speech.isSupported && (
+              <p className="brain-dump-voice-hint">Voice input isn't supported on this browser yet.</p>
+            )}
+
+            {speech.error && <p className="brain-dump-error">{speech.error}</p>}
 
             {errorMessage && <p className="brain-dump-error">{errorMessage}</p>}
 
