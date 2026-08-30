@@ -1,4 +1,5 @@
 import type { CalendarEventType, TaskCategory, TaskPriority } from './task';
+import type { ReminderPickerValue } from '../components/ui/ReminderPicker';
 
 export type BrainDumpSuggestionType = 'task' | 'event';
 
@@ -27,4 +28,12 @@ export interface BrainDumpSuggestion {
   included: boolean;
   /** Simple title+date match against existing items — not semantic dedup. */
   possibleDuplicate?: boolean;
+  /**
+   * Reuses the EXACT same value shape as the existing Add Task/Event
+   * reminder picker, so the Review card can embed the real <ReminderPicker>
+   * component unchanged. { preset: 'none', ... } means no reminder — this
+   * is the default; a reminder is only ever populated here when the AI
+   * detected explicit reminder intent in the text (see brainDumpApi.ts).
+   */
+  reminder: ReminderPickerValue;
 }

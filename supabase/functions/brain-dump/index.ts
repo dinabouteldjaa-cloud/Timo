@@ -77,6 +77,27 @@ interface RawSuggestion {
   eventType?: unknown;
   location?: unknown;
   confidence?: unknown;
+  reminder?: unknown;
+}
+
+interface RawReminder {
+  kind?: unknown;
+  offsetMinutes?: unknown;
+  date?: unknown;
+  time?: unknown;
+}
+
+/**
+ * A detected reminder INTENT only — not yet a real reminder record. The
+ * client (brainDumpApi.ts) converts this into the exact same
+ * ReminderPickerValue shape the existing Add Task/Event reminder picker
+ * already uses, so Review can embed that real component unchanged.
+ */
+interface NormalizedReminder {
+  kind: 'relative' | 'absolute';
+  offsetMinutes?: number; // for 'relative' — snapped to a supported preset
+  date?: string; // for 'absolute'
+  time?: string; // for 'absolute'
 }
 
 interface NormalizedSuggestion {
@@ -92,6 +113,7 @@ interface NormalizedSuggestion {
   eventType?: EventType;
   location?: string;
   confidence?: number;
+  reminder?: NormalizedReminder;
 }
 
 const MAX_INPUT_LENGTH = 4000;
@@ -149,6 +171,39 @@ function computeWeekdayTable(localDate: string): { todayWeekday: string; upcomin
   return { todayWeekday, upcoming };
 }
 
+// Only these exact offsets are supported by the existing reminder preset
+// system (see src/lib/reminderPresets.ts) — an arbitrary stated lead time
+// is snapped to the nearest one rather than inventing an unsupported value.
+const SUPPORTED_OFFSET_MINUTES = [0, 5, 15, 30, 60, 1440];
+
+function snapToSupportedOffset(minutes: number): number {
+  return SUPPORTED_OFFSET_MINUTES.reduce((best, candidate) =>
+    Math.abs(candidate - minutes) < Math.abs(best - minutes) ? candidate : best,
+  );
+}
+
+/** Validates a raw reminder intent from the model, or returns undefined if unusable/absent. */
+function normalizeReminder(raw: unknown): NormalizedReminder | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as RawReminder;
+
+  if (r.kind === 'relative') {
+    if (typeof r.offsetMinutes !== 'number' || !Number.isFinite(r.offsetMinutes) || r.offsetMinutes < 0) {
+      return undefined;
+    }
+    return { kind: 'relative', offsetMinutes: snapToSupportedOffset(r.offsetMinutes) };
+  }
+
+  if (r.kind === 'absolute') {
+    const date = typeof r.date === 'string' && DATE_RE.test(r.date) ? r.date : undefined;
+    const time = typeof r.time === 'string' && TIME_RE.test(r.time) ? r.time : undefined;
+    if (!date || !time) return undefined; // can't safely resolve without both
+    return { kind: 'absolute', date, time };
+  }
+
+  return undefined;
+}
+
 /** Validates and coerces one raw model item into a safe, schema-conforming suggestion, or null if unusable. */
 function normalizeSuggestion(raw: RawSuggestion): NormalizedSuggestion | null {
   if (raw.type !== 'task' && raw.type !== 'event') return null;
@@ -182,10 +237,12 @@ function normalizeSuggestion(raw: RawSuggestion): NormalizedSuggestion | null {
     confidence = Math.max(0, Math.min(1, raw.confidence));
   }
 
+  const reminder = normalizeReminder(raw.reminder);
+
   if (raw.type === 'task') {
-    return { type: 'task', title, description, date, time, priority, category, estimatedMinutes, confidence };
+    return { type: 'task', title, description, date, time, priority, category, estimatedMinutes, confidence, reminder };
   }
-  return { type: 'event', title, description, date, time, endTime, eventType, location, confidence };
+  return { type: 'event', title, description, date, time, endTime, eventType, location, confidence, reminder };
 }
 
 function buildSystemPrompt(localDate: string, localTime: string): string {
@@ -206,6 +263,22 @@ DATES:
 - A clearly actionable task with NO day mentioned at all and nothing suggesting it's for later -> use ${localDate} (today). Do this by default for ordinary undated to-dos.
 - Only leave date unset when the text is explicitly vague about timing (e.g. "sometime this week", "eventually", "one of these days", "whenever this week") — vagueness is about explicit hedging language, not simply the absence of a day.
 
+DATE SCOPE ACROSS COORDINATED ACTIONS — this takes priority over the "no day mentioned -> today" default above:
+- When a clause states an explicit date/day (e.g. "Tomorrow ...", "On Monday ..."), that date applies to every coordinated actionable item introduced in that same breath — items joined by "and", "then", or commas — until a NEW explicit date/day appears later in the text. An item covered this way DOES have a day (inherited), so it is not "no day mentioned".
+- Do NOT inherit time, duration, priority, or location across coordinated items this way — each of those only applies to the specific item it was actually stated for.
+- Examples:
+  "Tomorrow buy toothpaste and get a haircut" -> both items tomorrow.
+  "On Monday read for 30 minutes and study French for 2 hours" -> both Monday; each keeps its own separate duration, not the other's.
+  "Tomorrow call the bank at 10 AM and send the report" -> both items tomorrow; ONLY "call the bank" gets 10 AM.
+  "Tomorrow call Sarah and send invoice. Friday meet Ahmed." -> the first two are tomorrow; "meet Ahmed" is Friday because that new explicit date resets the inherited scope.
+
+REMINDER INTENT — only when the text explicitly asks to be reminded or not forget something. A stated date/time on its own is NEVER enough to add a reminder:
+- Trigger phrases include "remind me...", "don't let me forget...", "make sure I remember...", or clearly equivalent explicit requests. Ordinary timed tasks/events with no such wording get reminder: null.
+- If the text states an explicit lead time ("30 minutes before", "an hour before"), use { kind: "relative", offsetMinutes: <that many minutes>, date: null, time: null }.
+- If reminder wording asks to be reminded at/for the item's own time with no extra lead time (e.g. "remind me to call Ahmed at 7 PM"), use { kind: "relative", offsetMinutes: 0, date: null, time: null }.
+- If the item has no specific time of its own (e.g. a task merely due "tomorrow") but the reminder wording gives a rough time reference, use { kind: "absolute", offsetMinutes: null, date: <resolved date>, time: <a concrete "HH:MM"> } — pick a reasonable concrete time for vague parts of day (morning -> "09:00", afternoon -> "14:00", evening/tonight -> "18:00") unless a specific time is stated.
+- If reminder intent is unclear, or nothing usable can be resolved, set reminder to null rather than guessing.
+
 TASK vs EVENT — a stated time does NOT by itself make something an Event. Judge by what KIND of thing it is:
 - Usually a TASK even with a specific time attached: calling/texting someone, sending an email or message, buying or picking up something (including groceries), errands, chores, workouts, studying, submitting something, paying a bill. Example: "Call my dad at 4 PM" is a Task with time=16:00, not an Event.
 - Usually an EVENT: an appointment, a meeting, a reservation/booking, a class, a flight, a scheduled visit, or a lunch/dinner/meetup with someone framed as a fixed engagement (e.g. "lunch with Ahmed at 1:30 on Monday").
@@ -224,7 +297,7 @@ GENERAL:
 - Extract only actionable Tasks and Events/Meetings actually present in the text. Do not invent items that weren't mentioned.
 - Phrases like "I have to X", "I need to X", "I should X" each introduce an actionable to-do — treat each one as its own separate item, even when several appear together in one sentence, and split comma/"and"-separated lists into one suggestion per item. Do not merge separate items into one combined title.
 - Preserve the user's own wording for titles where reasonable, tidied into a short actionable phrase.
-- Only use these values: priority is one of low/medium/high (or null); category is one of work/personal/health/errands/learning/other (or null); eventType is one of event/meeting (or null). Use null for any field you are not reasonably confident about — do not guess.
+- Only use these values: priority is one of low/medium/high (or null); category is one of work/personal/health/errands/learning/other (or null); eventType is one of event/meeting (or null). Use null for any field you are not reasonably confident about — do not guess. reminder is null unless explicit reminder intent is present (see REMINDER INTENT above).
 - date must be an ISO date "YYYY-MM-DD". time and endTime must be 24-hour "HH:MM". Use null if you are not confident.
 - confidence is a number from 0 to 1 reflecting how clearly the item and its fields were stated.
 - If the text contains no actionable to-do or event at all (e.g. it's just a feeling or observation), return an empty suggestions array — do not force an item to exist.
@@ -265,6 +338,17 @@ const SUGGESTION_JSON_SCHEMA = {
             eventType: { type: ['string', 'null'], enum: ['event', 'meeting', null] },
             location: { type: ['string', 'null'] },
             confidence: { type: ['number', 'null'] },
+            reminder: {
+              type: ['object', 'null'],
+              properties: {
+                kind: { type: 'string', enum: ['relative', 'absolute'] },
+                offsetMinutes: { type: ['number', 'null'] },
+                date: { type: ['string', 'null'] },
+                time: { type: ['string', 'null'] },
+              },
+              required: ['kind', 'offsetMinutes', 'date', 'time'],
+              additionalProperties: false,
+            },
           },
           required: [
             'type',
@@ -279,6 +363,7 @@ const SUGGESTION_JSON_SCHEMA = {
             'eventType',
             'location',
             'confidence',
+            'reminder',
           ],
           additionalProperties: false,
         },

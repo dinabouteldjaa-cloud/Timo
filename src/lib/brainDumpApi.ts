@@ -1,4 +1,6 @@
 import { supabase } from './supabaseClient';
+import { emptyReminderValue, type ReminderPickerValue } from '../components/ui/ReminderPicker';
+import { presetForOffset } from './reminderPresets';
 import type { BrainDumpSuggestion } from '../types/brainDump';
 
 // ---------------------------------------------------------------------------
@@ -14,6 +16,13 @@ import type { BrainDumpSuggestion } from '../types/brainDump';
 // module handles them locally instead of forcing an ill-fitting reuse.
 // ---------------------------------------------------------------------------
 
+interface RawReminderIntent {
+  kind: 'relative' | 'absolute';
+  offsetMinutes?: number;
+  date?: string;
+  time?: string;
+}
+
 interface RawSuggestion {
   type: 'task' | 'event';
   title: string;
@@ -27,12 +36,35 @@ interface RawSuggestion {
   eventType?: BrainDumpSuggestion['eventType'];
   location?: string;
   confidence?: number;
+  reminder?: RawReminderIntent;
 }
 
 let nextClientId = 0;
 function makeClientId(): string {
   nextClientId += 1;
   return `suggestion-${Date.now()}-${nextClientId}`;
+}
+
+/**
+ * Converts the Edge Function's reminder INTENT into the exact same
+ * ReminderPickerValue shape the existing Add Task/Event reminder picker
+ * uses, so the Review card can embed that real component unchanged. The
+ * actual remind_at timestamp is only ever computed at save time (see
+ * BrainDumpPage.tsx), the same way AddTaskSheet/AddEventSheet already do
+ * it — never frozen here at extraction time.
+ */
+function reminderIntentToPickerValue(intent: RawReminderIntent | undefined): ReminderPickerValue {
+  if (!intent) return emptyReminderValue();
+
+  if (intent.kind === 'absolute' && intent.date && intent.time) {
+    return { preset: 'custom', customDate: intent.date, customTime: intent.time };
+  }
+
+  if (intent.kind === 'relative' && typeof intent.offsetMinutes === 'number') {
+    return { preset: presetForOffset(intent.offsetMinutes), customDate: '', customTime: '' };
+  }
+
+  return emptyReminderValue();
 }
 
 async function extractFunctionErrorMessage(error: unknown): Promise<string | null> {
@@ -65,5 +97,13 @@ export async function organizeBrainDump(text: string): Promise<BrainDumpSuggesti
   }
 
   const suggestions = (data?.suggestions ?? []) as RawSuggestion[];
-  return suggestions.map((s) => ({ ...s, id: makeClientId(), included: true }));
+  return suggestions.map((s) => {
+    const { reminder, ...rest } = s;
+    return {
+      ...rest,
+      id: makeClientId(),
+      included: true,
+      reminder: reminderIntentToPickerValue(reminder),
+    };
+  });
 }
