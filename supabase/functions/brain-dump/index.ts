@@ -247,19 +247,28 @@ function normalizeSuggestion(raw: RawSuggestion): NormalizedSuggestion | null {
 
 function buildSystemPrompt(localDate: string, localTime: string): string {
   const { todayWeekday, upcoming } = computeWeekdayTable(localDate);
-  const upcomingLines = upcoming.map((u) => `${u.weekday} = ${u.date}`).join(', ');
+  // One weekday per line, not a dense comma-joined single line. The
+  // deterministic table itself was always correct (verified
+  // independently) — the observed bug was the model misreading a long
+  // single-line "Monday = X, Tuesday = Y, ..." list and picking the wrong
+  // entry (it returned the LAST entry — Sunday's date — for "Monday").
+  // A short, unambiguous list of separate lines is far more reliable for
+  // a small/fast model to read correctly than one dense line.
+  const upcomingLines = upcoming.map((u) => `  - ${u.weekday}: ${u.date}`).join('\n');
 
   return `You organize messy personal planning notes for Timo, a task and calendar app.
 
 "Today" means exactly ${localDate}, which is a ${todayWeekday}. The current local time is ${localTime}, in the user's own timezone.
 
-Do NOT calculate weekday dates yourself. Use exactly this table for any named weekday mentioned in the text (these are already computed for you and are correct):
+Do NOT calculate weekday dates yourself. This table is already computed correctly for you — read it carefully, one line per weekday:
 ${upcomingLines}
-For example, if the text says "Monday", use the date given for Monday above — never derive it yourself.
+
+When the text names a weekday, find that EXACT weekday name in the table above and use ONLY the date on that same line. Before you finalize each date, re-read the table line for that weekday name to confirm the date you're about to use actually appears next to it — do not use a date from a different line.
+For example, if the text says "Monday", find the line starting with "Monday" above and use only the date on that line — never a different line, and never a date you compute yourself.
 
 DATES:
 - "today" -> ${localDate}. "tomorrow" -> the date immediately after ${localDate}.
-- A named weekday (e.g. "Friday", "next Monday") -> use the table above, exactly.
+- A named weekday (e.g. "Friday", "next Monday") -> use the table above, exactly, per the matching rule above.
 - A clearly actionable task with NO day mentioned at all and nothing suggesting it's for later -> use ${localDate} (today). Do this by default for ordinary undated to-dos.
 - Only leave date unset when the text is explicitly vague about timing (e.g. "sometime this week", "eventually", "one of these days", "whenever this week") — vagueness is about explicit hedging language, not simply the absence of a day.
 
