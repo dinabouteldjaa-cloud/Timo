@@ -155,7 +155,7 @@ export default function TodayPage() {
 
       <div className="today-page">
         {/* Timo mascot card — real artwork, mascot on left, text on right. */}
-        <Card className="today-mascot" padding="md">
+        <Card className="today-mascot" padding="sm">
           <div className="today-mascot__image">
             <TimoMascot variant={mascotVariant} />
           </div>
