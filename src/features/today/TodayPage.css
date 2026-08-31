@@ -6,23 +6,34 @@
 }
 
 /* Timo mascot card — image slot (left) + text (right). Renders the real
-   Timo artwork via TimoMascot (src/components/ui/TimoMascot.tsx), sized
-   to a fixed box with object-fit: contain so differently-sized source
-   PNGs never stretch or get cropped. */
+   Timo artwork via TimoMascot (src/components/ui/TimoMascot.tsx). The
+   source PNGs have a white background; rather than shrinking them into a
+   visible white square, .today-mascot__image blends the image into the
+   card via mix-blend-mode so it reads as sitting freely in the card
+   rather than inside a boxed frame. This is scoped to this hero card
+   only — TimoMascot's own CSS is untouched, so other future usages of
+   the component keep their default, unblended rendering. */
 .today-mascot {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  background: linear-gradient(135deg, var(--color-primary-soft), var(--color-surface) 70%);
+  gap: var(--space-4);
+  background: linear-gradient(135deg, var(--color-primary-soft), var(--color-surface) 65%);
 }
 
 .today-mascot__image {
   flex-shrink: 0;
-  width: 72px;
-  height: 72px;
+  width: 104px;
+  height: 104px;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.today-mascot__image .timo-mascot {
+  /* Blends the PNG's white background into whatever's behind it instead
+     of showing as an opaque white rectangle — no cropping, no distortion,
+     object-fit: contain (from TimoMascot's own CSS) is unaffected. */
+  mix-blend-mode: multiply;
 }
 
 .today-mascot__text {
