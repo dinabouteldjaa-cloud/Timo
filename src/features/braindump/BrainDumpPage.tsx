@@ -4,6 +4,7 @@ import Header from '../../components/layout/Header';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import TimoAvatar from '../../components/avatar/TimoAvatar';
+import TimoMascot from '../../components/ui/TimoMascot';
 import { useAppState, type ReminderSelection } from '../../state/AppStateContext';
 import { organizeBrainDump } from '../../lib/brainDumpApi';
 import { isPossibleDuplicate } from '../../lib/brainDumpDuplicates';
@@ -251,7 +252,9 @@ export default function BrainDumpPage() {
         {step === 'input' && (
           <>
             <Card padding="lg" className="brain-dump-hero">
-              <TimoAvatar state="thinking" size="lg" />
+              <div className="brain-dump-hero__mascot">
+                <TimoMascot variant="thinking" />
+              </div>
               <p className="brain-dump-hero__text">
                 Tell Timo everything on your mind — Timo will turn it into Tasks and Events for you
                 to review.
@@ -320,8 +323,10 @@ export default function BrainDumpPage() {
 
         {step === 'loading' && (
           <div className="brain-dump-loading">
-            <TimoAvatar state="thinking" size="lg" />
-            <p>Timo is organizing your notes…</p>
+            <div className="brain-dump-loading__mascot">
+              <TimoMascot variant="thinking" />
+            </div>
+            <p>Let me sort this out.</p>
           </div>
         )}
 

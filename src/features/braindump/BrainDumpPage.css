@@ -12,6 +12,25 @@
   background: linear-gradient(135deg, var(--color-primary-soft), var(--color-surface) 70%);
 }
 
+.brain-dump-hero__mascot {
+  flex-shrink: 0;
+  width: 96px;
+  height: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.brain-dump-hero__mascot .timo-mascot {
+  width: 100%;
+  height: 100%;
+  /* Same scoped approach as the Today hero: blends the mascot PNG's
+     white background into the card instead of showing an opaque white
+     square. Scoped to this component instance only — TimoMascot's own
+     CSS is untouched. */
+  mix-blend-mode: multiply;
+}
+
 .brain-dump-hero__text {
   margin: 0;
   font-size: 13.5px;
@@ -117,6 +136,20 @@
   text-align: center;
   gap: var(--space-4);
   padding: var(--space-10) var(--space-4);
+}
+
+.brain-dump-loading__mascot {
+  width: 96px;
+  height: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.brain-dump-loading__mascot .timo-mascot {
+  width: 100%;
+  height: 100%;
+  mix-blend-mode: multiply;
 }
 
 .brain-dump-loading p {
