@@ -251,7 +251,7 @@ export default function BrainDumpPage() {
       <div className="brain-dump-page">
         {step === 'input' && (
           <>
-            <Card padding="lg" className="brain-dump-hero">
+            <Card padding="sm" className="brain-dump-hero">
               <div className="brain-dump-hero__mascot">
                 <TimoMascot variant="thinking" />
               </div>

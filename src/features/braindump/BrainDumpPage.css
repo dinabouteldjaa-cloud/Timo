@@ -5,17 +5,21 @@
   padding: var(--space-2) var(--space-5) var(--space-8);
 }
 
+/* Large Timo hero — same 2-column pattern as TodayPage.css's .today-mascot:
+   a large mascot column (~40-45% width) and vertically-centered text.
+   Scoped to this component only — TimoMascot's own CSS is untouched. */
 .brain-dump-hero {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(110px, 42%) 1fr;
   align-items: center;
   gap: var(--space-4);
+  min-height: 150px;
   background: linear-gradient(135deg, var(--color-primary-soft), var(--color-surface) 70%);
 }
 
 .brain-dump-hero__mascot {
-  flex-shrink: 0;
-  width: 96px;
-  height: 96px;
+  height: 138px;
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -36,6 +40,19 @@
   font-size: 13.5px;
   color: var(--color-text-muted);
   line-height: 1.5;
+}
+
+/* Very narrow phones: scale the mascot area down gracefully rather than
+   letting the card overflow or the text get squeezed out of room. */
+@media (max-width: 360px) {
+  .brain-dump-hero {
+    grid-template-columns: minmax(90px, 38%) 1fr;
+    min-height: 130px;
+  }
+
+  .brain-dump-hero__mascot {
+    height: 108px;
+  }
 }
 
 .brain-dump-textarea-wrap {
