@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import Header from '../../components/layout/Header';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
-import EmptyState from '../../components/ui/EmptyState';
 import IconButton from '../../components/ui/IconButton';
 import { useLocale } from '../../i18n/LocaleContext';
 import { useAppState } from '../../state/AppStateContext';
@@ -293,7 +292,10 @@ export default function CalendarPage() {
             {eventsLoading ? (
               <p className="calendar-loading">Loading your calendar…</p>
             ) : agendaItems.length === 0 ? (
-              <EmptyState title={t.calendar.noEvents} subtitle={t.calendar.noEventsSubtitle} />
+              <div className="calendar-empty">
+                <p className="calendar-empty__title">{t.calendar.noEvents}</p>
+                <p className="calendar-empty__subtitle">{t.calendar.noEventsSubtitle}</p>
+              </div>
             ) : (
               agendaItems.map((item) =>
                 item.kind === 'event' ? (
