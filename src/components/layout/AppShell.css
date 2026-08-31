@@ -9,7 +9,7 @@
   width: 100%;
   max-width: var(--max-content-width);
   min-height: 100vh;
-  padding-bottom: calc(var(--bottom-nav-height) + var(--space-6));
+  padding-bottom: calc(var(--bottom-nav-height) + var(--space-6) + env(safe-area-inset-bottom));
   background: var(--color-bg);
   position: relative;
 }
