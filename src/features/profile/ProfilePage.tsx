@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import Header from '../../components/layout/Header';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
-import TimoAvatar from '../../components/avatar/TimoAvatar';
+import TimoMascot from '../../components/ui/TimoMascot';
 import Badge from '../../components/ui/Badge';
 import { useAuth } from '../../state/AuthContext';
 import {
@@ -95,7 +95,9 @@ export default function ProfilePage() {
 
       <div className="profile-page">
         <Card padding="lg" className="profile-hero">
-          <TimoAvatar state="resting" size="lg" />
+          <div className="profile-hero__mascot">
+            <TimoMascot variant="happy" />
+          </div>
           <div>
             <p className="profile-hero__name">{displayName}</p>
             <p className="profile-hero__sub">{user?.email}</p>

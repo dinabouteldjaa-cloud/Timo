@@ -12,6 +12,25 @@
   background: linear-gradient(135deg, var(--color-primary-soft), var(--color-surface) 70%);
 }
 
+.profile-hero__mascot {
+  flex-shrink: 0;
+  width: 76px;
+  height: 76px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.profile-hero__mascot .timo-mascot {
+  width: 100%;
+  height: 100%;
+  /* Same scoped approach used elsewhere for the white-background mascot
+     PNGs — blends into the card instead of showing an opaque square, and
+     with no circular frame behind it. Scoped to this instance only;
+     TimoMascot's own CSS is untouched. */
+  mix-blend-mode: multiply;
+}
+
 .profile-hero__name {
   margin: 0 0 2px;
   font-weight: 800;
