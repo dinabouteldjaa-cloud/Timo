@@ -11,6 +11,7 @@ import { getGreetingKey, formatFriendlyDate, toISODate } from '../../lib/utils';
 import { useAppState } from '../../state/AppStateContext';
 import AddTaskSheet from '../tasks/AddTaskSheet';
 import TaskDetailsSheet from '../tasks/TaskDetailsSheet';
+import NotificationOnboardingCard from './NotificationOnboardingCard';
 import type { Task } from '../../types/task';
 import './TodayPage.css';
 
@@ -154,6 +155,11 @@ export default function TodayPage() {
       <Header title={greeting} subtitle={dateLabel} />
 
       <div className="today-page">
+        {/* Shows only on a device's first eligible session — see
+            NotificationOnboardingCard for the exact eligibility checks.
+            Renders nothing once dismissed/enabled/denied/unsupported. */}
+        <NotificationOnboardingCard />
+
         {/* Timo mascot card — real artwork, mascot on left, text on right. */}
         <Card className="today-mascot" padding="sm">
           <div className="today-mascot__image">

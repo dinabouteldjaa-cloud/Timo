@@ -1,0 +1,56 @@
+.notification-onboarding {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  background: linear-gradient(135deg, var(--color-primary-soft), var(--color-surface-alt));
+}
+
+.notification-onboarding__mascot {
+  flex-shrink: 0;
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.notification-onboarding__mascot .timo-mascot {
+  width: 100%;
+  height: 100%;
+  /* Same scoped approach used elsewhere for the white-background mascot
+     PNGs — blends into the card instead of showing an opaque square.
+     Scoped to this instance only; TimoMascot's own CSS is untouched. */
+  mix-blend-mode: multiply;
+}
+
+.notification-onboarding__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.notification-onboarding__title {
+  margin: 0 0 2px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.notification-onboarding__message {
+  margin: 0 0 var(--space-3);
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+.notification-onboarding__actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.notification-onboarding__error {
+  margin: var(--space-2) 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-error);
+}
