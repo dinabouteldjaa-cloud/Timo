@@ -30,10 +30,17 @@
   box-shadow: var(--shadow-xs);
 }
 
+.calendar-month-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 var(--space-3);
+}
+
 .calendar-month-label {
   font-weight: 700;
   font-size: 15px;
-  margin: 0 0 var(--space-3);
+  margin: 0;
 }
 
 .calendar-grid {

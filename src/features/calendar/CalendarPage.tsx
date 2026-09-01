@@ -45,6 +45,23 @@ function isoForDay(reference: Date, day: number) {
   return `${y}-${m}-${d}`;
 }
 
+/**
+ * Moves a date forward/back by whole months, keeping the same day-of-month
+ * when the target month has that many days, otherwise clamping to the
+ * target month's last day (e.g. Jan 31 -> Feb 28/29). Year rollover
+ * (Dec -> Jan, Jan -> Dec) is handled automatically by JS Date's own
+ * month-overflow normalization — no manual special-casing needed.
+ */
+function addMonths(dateISO: string, delta: number): string {
+  const current = parseISODate(dateISO);
+  const day = current.getDate();
+  const targetYear = current.getFullYear();
+  const targetMonth = current.getMonth() + delta;
+  const daysInTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+  const clampedDay = Math.min(day, daysInTargetMonth);
+  return toISODate(new Date(targetYear, targetMonth, clampedDay));
+}
+
 function toMinutes(time: string): number {
   const [h, m] = time.split(':').map(Number);
   return h * 60 + m;
@@ -198,9 +215,29 @@ export default function CalendarPage() {
 
         {view === 'month' && (
           <Card padding="md">
-            <p className="calendar-month-label">
-              {new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(referenceMonth)}
-            </p>
+            <div className="calendar-month-nav">
+              <IconButton
+                size="sm"
+                aria-label="Previous month"
+                onClick={() => setSelectedDate((d) => addMonths(d, -1))}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                  <path d="M15 6l-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </IconButton>
+              <p className="calendar-month-label">
+                {new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(referenceMonth)}
+              </p>
+              <IconButton
+                size="sm"
+                aria-label="Next month"
+                onClick={() => setSelectedDate((d) => addMonths(d, 1))}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                  <path d="M9 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </IconButton>
+            </div>
             <div className="calendar-grid calendar-grid--headers">
               {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
                 <span key={i} className="calendar-grid__weekday">
