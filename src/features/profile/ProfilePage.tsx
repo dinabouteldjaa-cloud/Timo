@@ -16,7 +16,6 @@ import {
 import './ProfilePage.css';
 
 const rows = [
-  { label: 'Preferences', hint: 'Coming soon' },
   { label: 'Language', hint: 'English' },
   { label: 'About Timo', hint: 'v0.1' },
 ];
