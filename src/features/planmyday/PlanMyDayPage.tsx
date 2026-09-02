@@ -6,10 +6,10 @@ import Button from '../../components/ui/Button';
 import Badge from '../../components/ui/Badge';
 import EmptyState from '../../components/ui/EmptyState';
 import TimoAvatar from '../../components/avatar/TimoAvatar';
-import { useAppState } from '../../state/AppStateContext';
+import { useAppState, type NewTaskInput } from '../../state/AppStateContext';
 import { planMyDay } from '../../lib/planMyDayApi';
 import { toISODate } from '../../lib/utils';
-import { isDateAnOccurrence } from '../../lib/occurrences';
+import { isDateAnOccurrence, expandEventOccurrences } from '../../lib/occurrences';
 import type { PlannedTaskBlock, UnscheduledTask } from '../../types/planMyDay';
 import './PlanMyDayPage.css';
 
@@ -39,8 +39,10 @@ export default function PlanMyDayPage() {
     tasksLoading,
     eventsLoading,
     setTaskSchedule,
+    saveTaskOccurrenceOverride,
     taskOccurrenceCompletions,
     taskOccurrenceSkips,
+    eventOccurrenceSkips,
   } = useAppState();
 
   const [step, setStep] = useState<Step>('loading');
@@ -91,7 +93,18 @@ export default function PlanMyDayPage() {
       }),
     [tasks, taskOccurrenceCompletions, taskOccurrenceSkips],
   );
-  const todaysEvents = useMemo(() => events.filter((event) => event.eventDate === TODAY_ISO), [events]);
+  // Fix (review): recurring events must block their occupied time on
+  // every occurrence, not just on their original series start date.
+  // expandEventOccurrences already resolves skips (excluded entirely)
+  // and overrides (its own edited time wins over the series' default)
+  // for today specifically — Plan My Day only ever reads startTime/
+  // endTime/allDay (see planMyDayApi.ts), which are correct time-of-day
+  // values regardless of which occurrence date produced them, so no
+  // further date-correction is needed here.
+  const todaysEvents = useMemo(
+    () => expandEventOccurrences(events, TODAY_ISO, TODAY_ISO, eventOccurrenceSkips).map((occ) => occ.event),
+    [events, eventOccurrenceSkips],
+  );
 
   function handleBack() {
     navigate('/');
@@ -135,6 +148,46 @@ export default function PlanMyDayPage() {
 
   function taskFor(taskId: string) {
     return tasks.find((t) => t.id === taskId);
+  }
+
+  function findExistingOverride(seriesId: string, date: string) {
+    return tasks.find((t) => t.recurrenceParentId === seriesId && t.recurrenceOccurrenceDate === date);
+  }
+
+  /**
+   * Fix (review): accepting a plan must never write scheduled_date/
+   * scheduled_start_time/scheduled_end_time directly onto a still-
+   * recurring series parent — that would affect the series' identity
+   * for every future occurrence, not just today's. For a recurring
+   * series parent, this resolves (creating if needed) TODAY's occurrence
+   * override and returns ITS id instead, so the schedule is applied to
+   * an entirely ordinary, non-recurring row. Non-recurring tasks and
+   * already-existing overrides are returned unchanged — exactly the
+   * same direct-schedule behavior as before this fix.
+   */
+  async function resolveScheduleTargetId(taskId: string): Promise<string> {
+    const task = taskFor(taskId);
+    if (!task || task.recurrenceParentId || task.recurrenceType === 'none') {
+      return taskId;
+    }
+
+    const existingOverride = findExistingOverride(taskId, TODAY_ISO);
+    if (existingOverride) return existingOverride.id;
+
+    // No override exists yet for today — create one carrying the series'
+    // own current fields, WITHOUT copying its reminder (this only exists
+    // to hold today's schedule; it doesn't invent new reminder behavior).
+    const created = await saveTaskOccurrenceOverride(taskId, TODAY_ISO, {
+      title: task.title,
+      description: task.description,
+      dueDate: TODAY_ISO,
+      dueTime: task.dueTime,
+      priority: task.priority,
+      category: task.category,
+      estimatedMinutes: task.estimatedMinutes,
+      reminder: null,
+    } satisfies NewTaskInput);
+    return created.id;
   }
 
   function updateBlockTime(taskId: string, field: 'startTime' | 'endTime', value: string) {
@@ -216,7 +269,8 @@ export default function PlanMyDayPage() {
 
     for (const block of activeBlocks) {
       try {
-        await setTaskSchedule(block.taskId, {
+        const targetId = await resolveScheduleTargetId(block.taskId);
+        await setTaskSchedule(targetId, {
           date: TODAY_ISO,
           startTime: block.startTime,
           endTime: block.endTime,

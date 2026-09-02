@@ -41,26 +41,38 @@
 // PASS 2 — recurring tasks'/events' reminders (see
 // 0011_recurring_tasks_events.sql): a recurring item's reminder is still
 // just ONE row in `reminders` (one per task/event, exactly as before —
-// no new reminder system). Its remind_at only ever reflects the FIRST
-// occurrence's absolute timestamp; PASS 1 naturally delivers that first
-// occurrence once and then stays silent forever after (its
-// occurrence_date never changes). PASS 2 separately finds reminders whose
-// parent task/event is still recurring, checks whether TODAY is a valid
-// occurrence of that series (isOccurrenceUTC, a small self-contained
-// port of the same matching rules used in src/lib/recurrence.ts — Edge
-// Functions run in a separate Deno runtime with no shared package
-// between frontend and functions in this project, so this is duplicated
-// rather than imported, matching this function's existing style), and if
-// so, claims/sends it keyed to TODAY's date specifically — UNLESS:
-//   - today's occurrence was explicitly removed via "This occurrence"
-//     delete (checked against occurrence_skips), or
-//   - today's occurrence has its own override row (checked against
-//     tasks/calendar_events where recurrence_occurrence_date = today),
-//     in which case the OVERRIDE's own reminder — an entirely ordinary,
-//     non-recurring reminder tied to the override's own id — is already
-//     handled correctly by PASS 1, and sending the series parent's
-//     reminder too would be a duplicate notification for the same
-//     occurrence.
+// no new reminder system). PASS 1's view now EXCLUDES any reminder whose
+// parent task/event is still recurring, so PASS 2 is the sole owner of
+// recurring-reminder delivery — there is exactly one dedup identity per
+// reminder: (reminder_id, actual occurrence date).
+//
+// For each recurring reminder, this checks TWO candidate occurrence
+// dates — today and tomorrow — because with the currently supported
+// offsets (max 1440 minutes = 1 day), a reminder due "now" can only
+// belong to an occurrence on one of those two dates (isOccurrenceUTC, a
+// small self-contained port of the same matching rules used in
+// src/lib/recurrence.ts — Edge Functions run in a separate Deno runtime
+// with no shared package between frontend and functions in this
+// project, so this is duplicated rather than imported). For example: a
+// Monday 10:00 occurrence with a "1 day before" reminder fires Sunday
+// 10:00 — Sunday itself is not an occurrence at all, so checking only
+// "is today an occurrence" would never find it; checking "is tomorrow an
+// occurrence, with today being its reminder day" does. Skip and override
+// checks are matched against whichever of the two candidate dates is
+// actually being considered, not blindly against today — a Sunday
+// notification for a Monday occurrence checks MONDAY's skip/override.
+// If a candidate occurrence has its own override, the SERIES reminder is
+// skipped for that date — the override's own reminder is an entirely
+// ordinary, non-recurring reminder tied to the override's own id, and is
+// already handled correctly by PASS 1.
+//
+// Catch-up: because the due-check is `<= now()` rather than an exact
+// time match, a brief cron outage around a reminder's due moment does
+// not cause a missed delivery — the next run still finds it due and
+// sends it immediately. This does not attempt to recover a backlog
+// spanning multiple days of missed cron runs (out of scope here); it
+// specifically preserves catch-up for the near-term occurrence the
+// cross-day fix targets.
 //
 // KNOWN LIMITATION (disclosed, not silently assumed away): a recurring
 // reminder's fire time for a new occurrence is computed by shifting its
@@ -238,15 +250,27 @@ function formatFriendlyWhen(date: string, time: string | null): string {
   return `${dateLabel} at ${timeLabel}`;
 }
 
-/** Builds the notification title/body/url for a task-linked reminder. */
-function buildTaskNotification(task: TaskRow, offsetMinutes: number | null) {
+/**
+ * Builds the notification title/body/url for a task-linked reminder.
+ *
+ * occurrenceDateOverride (fix, final review item 4): for a recurring
+ * task, `task.due_date` is the SERIES's original stored date — showing
+ * it directly would display, say, a September date on an October
+ * occurrence's notification. When the actual occurrence date being
+ * notified is known (PASS 2), it's passed here and used instead. PASS 1
+ * (ordinary tasks and occurrence overrides, whose own due_date already
+ * IS the correct date) omits this and keeps its original behavior
+ * exactly as before.
+ */
+function buildTaskNotification(task: TaskRow, offsetMinutes: number | null, occurrenceDateOverride?: string) {
+  const effectiveDate = occurrenceDateOverride ?? task.due_date;
   const statusLine =
     offsetMinutes !== null
       ? offsetMinutes === 0
         ? 'Due now.'
         : `Due in ${offsetPhrase(offsetMinutes)}.`
-      : task.due_date
-        ? `Due ${formatFriendlyWhen(task.due_date, task.due_time)}.`
+      : effectiveDate
+        ? `Due ${formatFriendlyWhen(effectiveDate, task.due_time)}.`
         : 'Reminder for this task.';
 
   return {
@@ -256,8 +280,9 @@ function buildTaskNotification(task: TaskRow, offsetMinutes: number | null) {
   };
 }
 
-/** Builds the notification title/body/url for an event-linked reminder. */
-function buildEventNotification(event: EventRow, offsetMinutes: number | null) {
+/** Builds the notification title/body/url for an event-linked reminder. See buildTaskNotification for occurrenceDateOverride. */
+function buildEventNotification(event: EventRow, offsetMinutes: number | null, occurrenceDateOverride?: string) {
+  const effectiveDate = occurrenceDateOverride ?? event.event_date;
   const statusLine =
     offsetMinutes !== null
       ? offsetMinutes === 0
@@ -265,7 +290,7 @@ function buildEventNotification(event: EventRow, offsetMinutes: number | null) {
         : `Starts in ${offsetPhrase(offsetMinutes)}.`
       : event.all_day
         ? 'Today.'
-        : `Starts ${formatFriendlyWhen(event.event_date, event.start_time)}.`;
+        : `Starts ${formatFriendlyWhen(effectiveDate, event.start_time)}.`;
 
   return {
     title: 'Timo',
@@ -319,14 +344,14 @@ async function claimAndSend(
         .select('id, title, due_date, due_time')
         .eq('id', reminder.task_id)
         .maybeSingle();
-      if (task) notification = buildTaskNotification(task as TaskRow, reminder.offset_minutes);
+      if (task) notification = buildTaskNotification(task as TaskRow, reminder.offset_minutes, occurrenceDate);
     } else if (reminder.event_id) {
       const { data: event } = await supabase
         .from('calendar_events')
         .select('id, title, event_date, start_time, all_day, event_type')
         .eq('id', reminder.event_id)
         .maybeSingle();
-      if (event) notification = buildEventNotification(event as EventRow, reminder.offset_minutes);
+      if (event) notification = buildEventNotification(event as EventRow, reminder.offset_minutes, occurrenceDate);
     }
 
     if (!notification) {
@@ -458,66 +483,96 @@ Deno.serve(async (req) => {
     ),
   ].filter((r) => r.base_date); // a series needs a base date to recur from
 
-  // Fix #3 (review): a series reminder must never fire for a date the
-  // user explicitly removed via "This occurrence" delete.
-  const { data: todaysSkips } = await supabase
-    .from('occurrence_skips')
-    .select('task_id, event_id')
-    .eq('occurrence_date', todayISO);
+  // Fix #1 (final review): a reminder fires at "occurrence time - offset".
+  // With the currently supported offsets (max 1440 minutes = 1 day), that
+  // moment can fall on the occurrence's own date OR the day before it
+  // (e.g. a Monday 10:00 occurrence with a "1 day before" reminder fires
+  // Sunday 10:00 — Sunday itself is not an occurrence at all, so a check
+  // that only asks "is today an occurrence" would never find it). The
+  // fix is to treat the OCCURRENCE date, not today's date, as what's
+  // being searched for: check both todayISO and tomorrowISO as candidate
+  // occurrence dates, since a reminder due "now" can only belong to an
+  // occurrence on one of those two dates given the 1-day offset ceiling.
+  const tomorrowISO = new Date(nowUTC.getTime() + 86400000).toISOString().slice(0, 10);
+  const candidateOccurrenceDates = [todayISO, tomorrowISO];
 
-  const skippedSeriesIds = new Set(
-    ((todaysSkips ?? []) as { task_id: string | null; event_id: string | null }[]).map(
-      (s) => s.task_id ?? s.event_id,
+  // Fix #3 (final review): skip/override checks must be keyed to the
+  // ACTUAL occurrence date being considered (which may be tomorrow, per
+  // the fix above), not unconditionally todayISO — a Sunday notification
+  // for a Monday occurrence must check MONDAY's skip/override, not
+  // Sunday's. Both dates' skips/overrides are fetched up front in one
+  // batch each, then looked up per (seriesId, candidateDate) pair below.
+  const { data: candidateSkips } = await supabase
+    .from('occurrence_skips')
+    .select('task_id, event_id, occurrence_date')
+    .in('occurrence_date', candidateOccurrenceDates);
+
+  const skippedKeys = new Set(
+    ((candidateSkips ?? []) as { task_id: string | null; event_id: string | null; occurrence_date: string }[]).map(
+      (s) => `${s.task_id ?? s.event_id}::${s.occurrence_date}`,
     ),
   );
 
-  // Fix #4 (review): if today's occurrence has been overridden by its
-  // own real task/event row, the SERIES reminder must not also fire for
-  // today — the override's own reminder (a completely ordinary,
+  // If a candidate occurrence has been overridden by its own real
+  // task/event row, the SERIES reminder must not also fire for that
+  // date — the override's own reminder (a completely ordinary,
   // non-recurring reminder tied to the override's own id, if the user
   // set one while editing "this occurrence") is already handled
   // correctly and separately by PASS 1 above. Skipping the parent here
   // is what prevents a duplicate notification for the same occurrence.
-  const { data: todaysTaskOverrides } = await supabase
+  const { data: candidateTaskOverrides } = await supabase
     .from('tasks')
-    .select('recurrence_parent_id')
-    .eq('recurrence_occurrence_date', todayISO)
+    .select('recurrence_parent_id, recurrence_occurrence_date')
+    .in('recurrence_occurrence_date', candidateOccurrenceDates)
     .not('recurrence_parent_id', 'is', null);
 
-  const { data: todaysEventOverrides } = await supabase
+  const { data: candidateEventOverrides } = await supabase
     .from('calendar_events')
-    .select('recurrence_parent_id')
-    .eq('recurrence_occurrence_date', todayISO)
+    .select('recurrence_parent_id, recurrence_occurrence_date')
+    .in('recurrence_occurrence_date', candidateOccurrenceDates)
     .not('recurrence_parent_id', 'is', null);
 
-  const overriddenSeriesIds = new Set([
-    ...((todaysTaskOverrides ?? []) as { recurrence_parent_id: string }[]).map((o) => o.recurrence_parent_id),
-    ...((todaysEventOverrides ?? []) as { recurrence_parent_id: string }[]).map((o) => o.recurrence_parent_id),
+  const overriddenKeys = new Set([
+    ...((candidateTaskOverrides ?? []) as { recurrence_parent_id: string; recurrence_occurrence_date: string }[]).map(
+      (o) => `${o.recurrence_parent_id}::${o.recurrence_occurrence_date}`,
+    ),
+    ...(
+      (candidateEventOverrides ?? []) as { recurrence_parent_id: string; recurrence_occurrence_date: string }[]
+    ).map((o) => `${o.recurrence_parent_id}::${o.recurrence_occurrence_date}`),
   ]);
 
   let recurringChecked = 0;
   for (const row of recurringRows) {
-    if (!isOccurrenceUTC(row.base_date, row, todayISO)) continue;
-
     const seriesId = row.task_id ?? row.event_id;
-    if (seriesId && skippedSeriesIds.has(seriesId)) continue; // fix #3
-    if (seriesId && overriddenSeriesIds.has(seriesId)) continue; // fix #4
 
-    recurringChecked++;
+    for (const candidateDate of candidateOccurrenceDates) {
+      if (!isOccurrenceUTC(row.base_date, row, candidateDate)) continue;
 
-    // Fix #5: day-shift the original absolute instant rather than
-    // reconstructing time-of-day from today's date — see
-    // computeCandidateRemindAt's own comment for why the old approach
-    // was wrong for any offset that crosses a calendar date boundary.
-    const candidateRemindAt = computeCandidateRemindAt(row.remind_at, row.base_date, todayISO);
-    if (candidateRemindAt > nowUTC) continue; // not due yet today
+      const key = `${seriesId}::${candidateDate}`;
+      if (seriesId && skippedKeys.has(key)) continue; // fix #3
+      if (seriesId && overriddenKeys.has(key)) continue; // fix #3
 
-    await claimAndSend(
-      supabase,
-      { reminder_id: row.id, user_id: row.user_id, offset_minutes: row.offset_minutes, task_id: row.task_id, event_id: row.event_id },
-      todayISO,
-      counts,
-    );
+      recurringChecked++;
+
+      // Fix #5: day-shift the original absolute instant rather than
+      // reconstructing time-of-day from the candidate date — see
+      // computeCandidateRemindAt's own comment for why the old approach
+      // was wrong for any offset that crosses a calendar date boundary.
+      const candidateRemindAt = computeCandidateRemindAt(row.remind_at, row.base_date, candidateDate);
+      if (candidateRemindAt > nowUTC) continue; // not due yet
+
+      // occurrence_date used for the claim is the ACTUAL occurrence
+      // (e.g. Monday), not today's date (e.g. Sunday) — this is what
+      // gives every recurring reminder exactly one dedup identity
+      // regardless of which day the cron happens to be running on when
+      // it fires (fix #2).
+      await claimAndSend(
+        supabase,
+        { reminder_id: row.id, user_id: row.user_id, offset_minutes: row.offset_minutes, task_id: row.task_id, event_id: row.event_id },
+        candidateDate,
+        counts,
+      );
+    }
   }
 
   return new Response(
