@@ -112,14 +112,43 @@ export default function TasksPage() {
         }));
       return [...nonRecurringCompleted, ...recurringCompleted];
     }
-    // "All" intentionally shows each task/series ONCE as its own defining
-    // row (not expanded into every future date) — a flat list of every
-    // future occurrence of every recurring series would be unbounded and
-    // unreadable here. Today and Calendar are where occurrences are
-    // browsed by date; this stays a list of "things you have."
+    // "All" shows each task/series ONCE — never expanded into every
+    // future date, since a flat list of every occurrence of every
+    // recurring series would be unbounded and unreadable here (Today and
+    // Calendar are where occurrences are browsed by date; this stays a
+    // list of "things you have"). For a recurring series specifically,
+    // this now shows its EFFECTIVE current/next pending occurrence
+    // (reusing the same `occurrences` already computed above for
+    // Today/Upcoming/Completed) instead of the series parent's own raw
+    // stored fields — so an edited "This occurrence" override, or a
+    // completed today, is correctly reflected here too, matching what
+    // Today/Calendar already show for the same date. Falls back to the
+    // raw series parent only if no pending occurrence exists within the
+    // lookup horizon (e.g. an ended series) — same as before in that
+    // edge case. Attaching occurrenceDate/seriesId here also means
+    // tapping/checking this row goes through the exact same existing
+    // this-occurrence-vs-series choice and per-occurrence completion
+    // logic Today/Upcoming already use — no new logic, just correctly
+    // supplying the context that logic already expects.
     return tasks
       .filter((task) => !task.recurrenceParentId)
-      .map((task) => ({ row: task, editTask: task }));
+      .map((task) => {
+        if (task.recurrenceType === 'none') {
+          return { row: task, editTask: task };
+        }
+        const nextOccurrence = occurrences
+          .filter((occ) => occ.seriesId === task.id && !occ.completed)
+          .sort((a, b) => a.date.localeCompare(b.date))[0];
+        if (!nextOccurrence) {
+          return { row: task, editTask: task };
+        }
+        return {
+          row: occurrenceAsTask(nextOccurrence),
+          editTask: nextOccurrence.task,
+          occurrenceDate: nextOccurrence.date,
+          seriesId: nextOccurrence.seriesId,
+        };
+      });
   }, [filter, tasks, occurrences]);
 
   function openAdd() {
