@@ -11,9 +11,11 @@ interface TaskRowProps {
   onToggle?: (id: string) => void;
   onOpen?: (task: Task) => void;
   hasReminder?: boolean;
+  /** Shows a small, subdued "Overdue" label — deliberately understated, not an alert/warning style. */
+  overdue?: boolean;
 }
 
-export default function TaskRow({ task, onToggle, onOpen, hasReminder }: TaskRowProps) {
+export default function TaskRow({ task, onToggle, onOpen, hasReminder, overdue }: TaskRowProps) {
   const { t } = useLocale();
   const done = task.status === 'completed';
 
@@ -94,7 +96,10 @@ export default function TaskRow({ task, onToggle, onOpen, hasReminder }: TaskRow
         </p>
         <p className="task-row__meta">{metaParts.join(' • ')}</p>
       </div>
-      <Badge tone={task.priority}>{t.priority[task.priority]}</Badge>
+      <div className="task-row__badges">
+        {overdue && <Badge tone="neutral">{t.tasks.filterOverdue}</Badge>}
+        <Badge tone={task.priority}>{t.priority[task.priority]}</Badge>
+      </div>
     </div>
   );
 }
