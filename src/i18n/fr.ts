@@ -36,6 +36,7 @@ const fr: Strings = {
     title: 'Tâches',
     filterAll: 'Toutes',
     filterToday: "Aujourd'hui",
+    filterOverdue: 'En retard',
     filterUpcoming: 'À venir',
     filterCompleted: 'Terminées',
     addTask: 'Ajouter une tâche',

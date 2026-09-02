@@ -34,6 +34,7 @@ const en = {
     title: 'Tasks',
     filterAll: 'All',
     filterToday: 'Today',
+    filterOverdue: 'Overdue',
     filterUpcoming: 'Upcoming',
     filterCompleted: 'Completed',
     addTask: 'Add task',
