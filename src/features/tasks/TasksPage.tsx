@@ -8,7 +8,7 @@ import IconButton from '../../components/ui/IconButton';
 import { useLocale } from '../../i18n/LocaleContext';
 import { useAppState } from '../../state/AppStateContext';
 import { expandTaskOccurrences } from '../../lib/occurrences';
-import { toISODate, addDays } from '../../lib/utils';
+import { toISODate, addDays, formatUpcomingDateLabel } from '../../lib/utils';
 import type { Task } from '../../types/task';
 import AddTaskSheet from './AddTaskSheet';
 import './TasksPage.css';
@@ -63,7 +63,7 @@ function isOccurrenceOverdue(
 }
 
 export default function TasksPage() {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const {
     tasks,
     tasksLoading,
@@ -193,19 +193,63 @@ export default function TasksPage() {
           seriesId: occ.seriesId,
         }));
 
-      return [...nonRecurringOverdue, ...recurringOverdue].sort((a, b) =>
-        (a.occurrenceDate ?? a.row.dueDate ?? '').localeCompare(b.occurrenceDate ?? b.row.dueDate ?? ''),
-      );
+      return [...nonRecurringOverdue, ...recurringOverdue].sort((a, b) => {
+        const dateA = a.occurrenceDate ?? a.row.dueDate ?? '';
+        const dateB = b.occurrenceDate ?? b.row.dueDate ?? '';
+        if (dateA !== dateB) return dateB.localeCompare(dateA); // most recent date first
+        // Same day: the more recently missed (later) time comes first;
+        // an entry with no time at all sorts after one that has a time.
+        const timeA = a.row.dueTime ?? '';
+        const timeB = b.row.dueTime ?? '';
+        if (!timeA && !timeB) return 0;
+        if (!timeA) return 1;
+        if (!timeB) return -1;
+        return timeB.localeCompare(timeA);
+      });
     }
     if (filter === 'upcoming') {
-      return occurrences
-        .filter((occ) => occ.date > todayISO && !occ.completed)
+      const nonRecurringUpcoming: FilteredRow[] = occurrences
+        .filter((occ) => !occ.isRecurring && occ.date > todayISO && !occ.completed)
         .map((occ) => ({
           row: occurrenceAsTask(occ),
           editTask: occ.task,
           occurrenceDate: occ.date,
           seriesId: occ.seriesId,
         }));
+
+      // Fix (review): show only the SINGLE next upcoming incomplete
+      // occurrence per recurring series — never every future date, which
+      // previously produced 10+ identical-looking rows for a daily task.
+      // Mirrors exactly the same "next pending occurrence" resolution
+      // already used by "All" below. Completed/skipped occurrences are
+      // already excluded from `occurrences` (skips never appear at all;
+      // `!occ.completed` is checked per-occurrence, never the series
+      // parent's own status) — so once the shown occurrence is completed
+      // or skipped, this naturally resolves to whichever is next.
+      // Occurrence overrides are unaffected: `occurrences` already
+      // substitutes an override's own effective date/time wherever one
+      // exists, with no special-casing needed here.
+      const recurringSeriesIds = new Set(
+        tasks.filter((task) => !task.recurrenceParentId && task.recurrenceType !== 'none').map((task) => task.id),
+      );
+      const recurringUpcoming: FilteredRow[] = [];
+      for (const seriesId of recurringSeriesIds) {
+        const next = occurrences
+          .filter((occ) => occ.seriesId === seriesId && occ.date > todayISO && !occ.completed)
+          .sort((a, b) => a.date.localeCompare(b.date))[0];
+        if (next) {
+          recurringUpcoming.push({
+            row: occurrenceAsTask(next),
+            editTask: next.task,
+            occurrenceDate: next.date,
+            seriesId: next.seriesId,
+          });
+        }
+      }
+
+      return [...nonRecurringUpcoming, ...recurringUpcoming].sort((a, b) =>
+        (a.occurrenceDate ?? '').localeCompare(b.occurrenceDate ?? ''),
+      );
     }
     if (filter === 'completed') {
       const nonRecurringCompleted = tasks
@@ -359,6 +403,10 @@ export default function TasksPage() {
                 row.row.status !== 'completed' &&
                 Boolean(rowDate) &&
                 isOccurrenceOverdue(rowDate as string, row.row.dueTime, todayISO, nowTimeHHMM);
+              const dateLabel =
+                filter === 'upcoming' && rowDate
+                  ? formatUpcomingDateLabel(locale, rowDate, todayISO, t.tasks.tomorrow)
+                  : undefined;
               return (
                 <TaskRow
                   key={row.occurrenceDate ? `${row.seriesId}::${row.occurrenceDate}` : row.row.id}
@@ -367,6 +415,7 @@ export default function TasksPage() {
                   onOpen={() => handleRowTap(row)}
                   hasReminder={reminders.some((r) => r.taskId === row.editTask.id)}
                   overdue={isOverdueRow}
+                  dateLabel={dateLabel}
                 />
               );
             })
