@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import Header from '../../components/layout/Header';
 import Card from '../../components/ui/Card';
+import Button from '../../components/ui/Button';
 import TaskRow from '../../components/ui/TaskRow';
 import EmptyState from '../../components/ui/EmptyState';
 import IconButton from '../../components/ui/IconButton';
@@ -31,6 +32,7 @@ export default function TasksPage() {
     addTask,
     updateTask,
     deleteTask,
+    saveTaskOccurrenceOverride,
     reminders,
     taskOccurrenceCompletions,
     taskOccurrenceSkips,
@@ -39,6 +41,10 @@ export default function TasksPage() {
   const [filter, setFilter] = useState<Filter>('all');
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [sheetHidesRecurrence, setSheetHidesRecurrence] = useState(false);
+  const [overrideContext, setOverrideContext] = useState<{ seriesId: string; date: string } | null>(null);
+  type FilteredRow = { row: Task; editTask: Task; occurrenceDate?: string; seriesId?: string };
+  const [choiceRow, setChoiceRow] = useState<FilteredRow | null>(null);
 
   const filters: { key: Filter; label: string }[] = [
     { key: 'all', label: t.tasks.filterAll },
@@ -71,7 +77,7 @@ export default function TasksPage() {
     };
   }
 
-  const filtered: { row: Task; editTask: Task; occurrenceDate?: string; seriesId?: string }[] = useMemo(() => {
+  const filtered: FilteredRow[] = useMemo(() => {
     if (filter === 'today') {
       return occurrences
         .filter((occ) => occ.date === todayISO && !occ.completed)
@@ -118,17 +124,60 @@ export default function TasksPage() {
 
   function openAdd() {
     setEditingTask(null);
+    setSheetHidesRecurrence(false);
+    setOverrideContext(null);
     setSheetOpen(true);
   }
 
   function openEdit(task: Task) {
     setEditingTask(task);
+    setSheetHidesRecurrence(false);
+    setOverrideContext(null);
     setSheetOpen(true);
   }
 
   function closeSheet() {
     setSheetOpen(false);
     setEditingTask(null);
+    setSheetHidesRecurrence(false);
+    setOverrideContext(null);
+  }
+
+  /**
+   * Fix (review, item 9): a recurring occurrence must never be edited by
+   * silently opening the series parent directly — the user must
+   * explicitly choose "This occurrence" or "Entire series" first. An
+   * override row (recurrenceType === 'none' on the edited row itself) or
+   * an ordinary, non-recurring task skips the choice and opens straight
+   * into editing, exactly as before — only a still-recurring virtual
+   * occurrence triggers the choice.
+   */
+  function handleRowTap(row: FilteredRow) {
+    const isRecurringOccurrence = Boolean(row.occurrenceDate && row.editTask.recurrenceType !== 'none');
+    if (isRecurringOccurrence) {
+      setChoiceRow(row);
+    } else {
+      openEdit(row.editTask);
+    }
+  }
+
+  function closeChoice() {
+    setChoiceRow(null);
+  }
+
+  function chooseEditOccurrence() {
+    if (!choiceRow || !choiceRow.occurrenceDate || !choiceRow.seriesId) return;
+    setEditingTask({ ...choiceRow.editTask, dueDate: choiceRow.occurrenceDate });
+    setSheetHidesRecurrence(true);
+    setOverrideContext({ seriesId: choiceRow.seriesId, date: choiceRow.occurrenceDate });
+    setChoiceRow(null);
+    setSheetOpen(true);
+  }
+
+  function chooseEditSeries() {
+    if (!choiceRow) return;
+    openEdit(choiceRow.editTask);
+    setChoiceRow(null);
   }
 
   function handleToggle(row: { row: Task; occurrenceDate?: string; seriesId?: string }) {
@@ -171,7 +220,7 @@ export default function TasksPage() {
                 key={row.occurrenceDate ? `${row.seriesId}::${row.occurrenceDate}` : row.row.id}
                 task={row.row}
                 onToggle={() => handleToggle(row)}
-                onOpen={() => openEdit(row.editTask)}
+                onOpen={() => handleRowTap(row)}
                 hasReminder={reminders.some((r) => r.taskId === row.editTask.id)}
               />
             ))
@@ -191,9 +240,12 @@ export default function TasksPage() {
         existingReminder={
           editingTask ? reminders.find((r) => r.taskId === editingTask.id) ?? null : null
         }
+        hideRecurrence={sheetHidesRecurrence}
         onClose={closeSheet}
         onSave={async (input) => {
-          if (editingTask) {
+          if (overrideContext) {
+            await saveTaskOccurrenceOverride(overrideContext.seriesId, overrideContext.date, input);
+          } else if (editingTask) {
             await updateTask(editingTask.id, input);
           } else {
             await addTask(input);
@@ -201,7 +253,7 @@ export default function TasksPage() {
           closeSheet();
         }}
         onDelete={
-          editingTask
+          editingTask && !overrideContext
             ? async () => {
                 await deleteTask(editingTask.id);
                 closeSheet();
@@ -209,6 +261,25 @@ export default function TasksPage() {
             : undefined
         }
       />
+
+      {choiceRow && (
+        <div className="add-task-overlay" role="dialog" aria-modal="true" aria-label="Edit recurring task">
+          <Card padding="lg" className="tasks-occurrence-choice">
+            <p className="tasks-occurrence-choice__title">Edit just this occurrence, or the whole series?</p>
+            <div className="tasks-occurrence-choice__actions">
+              <Button variant="ghost" fullWidth onClick={closeChoice}>
+                Cancel
+              </Button>
+              <Button variant="secondary" fullWidth onClick={chooseEditOccurrence}>
+                This occurrence
+              </Button>
+              <Button fullWidth onClick={chooseEditSeries}>
+                Entire series
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
     </>
   );
 }

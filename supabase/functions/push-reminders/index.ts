@@ -51,17 +51,32 @@
 // Functions run in a separate Deno runtime with no shared package
 // between frontend and functions in this project, so this is duplicated
 // rather than imported, matching this function's existing style), and if
-// so, claims/sends it keyed to TODAY's date specifically.
+// so, claims/sends it keyed to TODAY's date specifically — UNLESS:
+//   - today's occurrence was explicitly removed via "This occurrence"
+//     delete (checked against occurrence_skips), or
+//   - today's occurrence has its own override row (checked against
+//     tasks/calendar_events where recurrence_occurrence_date = today),
+//     in which case the OVERRIDE's own reminder — an entirely ordinary,
+//     non-recurring reminder tied to the override's own id — is already
+//     handled correctly by PASS 1, and sending the series parent's
+//     reminder too would be a duplicate notification for the same
+//     occurrence.
 //
 // KNOWN LIMITATION (disclosed, not silently assumed away): a recurring
-// reminder's time-of-day is derived from the UTC clock time of its
-// original remind_at, reapplied to each new occurrence date. This is
-// correct as long as the user's UTC offset doesn't change between
-// occurrences (e.g. no DST transition, no travel across timezones) —
-// exactly the same class of assumption the rest of this reminder system
-// already makes by storing only a UTC instant with no separate timezone
-// field. Fixing this fully would require storing the user's timezone
-// somewhere, which does not exist yet anywhere in this schema.
+// reminder's fire time for a new occurrence is computed by shifting its
+// original absolute remind_at instant forward by the whole number of
+// days between the base occurrence and the new one (see
+// computeCandidateRemindAt below) — this exactly preserves the original
+// offset relationship (including one that crosses midnight — see fix #5
+// in the review this function was corrected against) as long as the
+// user's UTC offset doesn't change between occurrences (e.g. no DST
+// transition, no travel across timezones). That's the same class of
+// assumption the rest of this reminder system already makes by storing
+// only a UTC instant with no separate timezone field — this does not
+// invent any new timezone behavior, it only fixes how the existing
+// UTC-instant assumption is applied across day boundaries. Fixing this
+// fully would require storing the user's timezone somewhere, which does
+// not exist yet anywhere in this schema.
 //
 // For BOTH passes: sends a Web Push message to every device
 // (push_subscriptions row) the reminder's owner has registered, and if
@@ -140,6 +155,35 @@ interface PushSubscriptionRow {
   endpoint: string;
   p256dh: string;
   auth: string;
+}
+
+function utcMidnightMillis(dateISO: string): number {
+  const [y, m, d] = dateISO.split('-').map(Number);
+  return Date.UTC(y, m - 1, d);
+}
+
+/**
+ * Fix (review, item 5): the previous version reconstructed a candidate
+ * remind_at by combining today's date with the ORIGINAL remind_at's
+ * time-of-day. That silently breaks any reminder whose offset crosses a
+ * calendar date boundary relative to the occurrence's own date — e.g. a
+ * Monday 10:00 event with a "1 day before" reminder actually fires
+ * SUNDAY 10:00, so its stored remind_at's date is already one day before
+ * the event's own base_date; recombining that time-of-day with a NEW
+ * occurrence's date (Monday, not Sunday) would incorrectly point the
+ * reminder at the wrong day entirely.
+ *
+ * The fix: shift the ORIGINAL absolute remind_at instant forward by the
+ * exact number of whole days between the base occurrence and the new
+ * one. This preserves whatever the original date/time relationship was
+ * — including one that crosses midnight — for every future occurrence,
+ * without ever reconstructing it from scratch.
+ */
+function computeCandidateRemindAt(originalRemindAtISO: string, baseDateISO: string, occurrenceDateISO: string): Date {
+  const daysSinceBase = Math.round(
+    (utcMidnightMillis(occurrenceDateISO) - utcMidnightMillis(baseDateISO)) / 86400000,
+  );
+  return new Date(new Date(originalRemindAtISO).getTime() + daysSinceBase * 86400000);
 }
 
 /**
@@ -414,16 +458,58 @@ Deno.serve(async (req) => {
     ),
   ].filter((r) => r.base_date); // a series needs a base date to recur from
 
+  // Fix #3 (review): a series reminder must never fire for a date the
+  // user explicitly removed via "This occurrence" delete.
+  const { data: todaysSkips } = await supabase
+    .from('occurrence_skips')
+    .select('task_id, event_id')
+    .eq('occurrence_date', todayISO);
+
+  const skippedSeriesIds = new Set(
+    ((todaysSkips ?? []) as { task_id: string | null; event_id: string | null }[]).map(
+      (s) => s.task_id ?? s.event_id,
+    ),
+  );
+
+  // Fix #4 (review): if today's occurrence has been overridden by its
+  // own real task/event row, the SERIES reminder must not also fire for
+  // today — the override's own reminder (a completely ordinary,
+  // non-recurring reminder tied to the override's own id, if the user
+  // set one while editing "this occurrence") is already handled
+  // correctly and separately by PASS 1 above. Skipping the parent here
+  // is what prevents a duplicate notification for the same occurrence.
+  const { data: todaysTaskOverrides } = await supabase
+    .from('tasks')
+    .select('recurrence_parent_id')
+    .eq('recurrence_occurrence_date', todayISO)
+    .not('recurrence_parent_id', 'is', null);
+
+  const { data: todaysEventOverrides } = await supabase
+    .from('calendar_events')
+    .select('recurrence_parent_id')
+    .eq('recurrence_occurrence_date', todayISO)
+    .not('recurrence_parent_id', 'is', null);
+
+  const overriddenSeriesIds = new Set([
+    ...((todaysTaskOverrides ?? []) as { recurrence_parent_id: string }[]).map((o) => o.recurrence_parent_id),
+    ...((todaysEventOverrides ?? []) as { recurrence_parent_id: string }[]).map((o) => o.recurrence_parent_id),
+  ]);
+
   let recurringChecked = 0;
   for (const row of recurringRows) {
     if (!isOccurrenceUTC(row.base_date, row, todayISO)) continue;
+
+    const seriesId = row.task_id ?? row.event_id;
+    if (seriesId && skippedSeriesIds.has(seriesId)) continue; // fix #3
+    if (seriesId && overriddenSeriesIds.has(seriesId)) continue; // fix #4
+
     recurringChecked++;
 
-    // Reapply the reminder's original UTC time-of-day to TODAY's date —
-    // see the KNOWN LIMITATION note in the module header for what this
-    // does and doesn't guarantee across DST/timezone changes.
-    const timeOfDayUTC = row.remind_at.slice(11, 19);
-    const candidateRemindAt = new Date(`${todayISO}T${timeOfDayUTC}Z`);
+    // Fix #5: day-shift the original absolute instant rather than
+    // reconstructing time-of-day from today's date — see
+    // computeCandidateRemindAt's own comment for why the old approach
+    // was wrong for any offset that crosses a calendar date boundary.
+    const candidateRemindAt = computeCandidateRemindAt(row.remind_at, row.base_date, todayISO);
     if (candidateRemindAt > nowUTC) continue; // not due yet today
 
     await claimAndSend(

@@ -95,6 +95,7 @@ export default function AddTaskSheet({
   );
   const [titleTouched, setTitleTouched] = useState(false);
   const [reminderError, setReminderError] = useState<string | null>(null);
+  const [recurrenceError, setRecurrenceError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const isEditing = Boolean(task);
 
@@ -105,6 +106,7 @@ export default function AddTaskSheet({
       setRecurrenceValue(recurrenceValueFromTask(task));
       setTitleTouched(false);
       setReminderError(null);
+      setRecurrenceError(null);
       setSaving(false);
     }
   }, [open, task, existingReminder]);
@@ -134,11 +136,33 @@ export default function AddTaskSheet({
     };
   }
 
+  function validateRecurrence(): string | null {
+    if (hideRecurrence || recurrenceValue.type === 'none') return null;
+    // Mirrors the DB constraints in 0011_recurring_tasks_events.sql exactly
+    // (tasks_recurring_requires_due_date / tasks_custom_recurrence_requires_days /
+    // tasks_recurrence_end_not_before_start) so the user sees a clear
+    // in-form message instead of a raw database error.
+    if (!form.date) return 'A recurring task needs a date to repeat from.';
+    if (recurrenceValue.type === 'custom' && recurrenceValue.daysOfWeek.length === 0) {
+      return 'Choose at least one day for a custom repeat.';
+    }
+    if (recurrenceValue.endDate && recurrenceValue.endDate < form.date) {
+      return "The end date can't be before the start date.";
+    }
+    return null;
+  }
+
   async function handleSave() {
     if (form.title.trim().length === 0) {
       setTitleTouched(true);
       return;
     }
+    const recurrenceValidationError = validateRecurrence();
+    if (recurrenceValidationError) {
+      setRecurrenceError(recurrenceValidationError);
+      return;
+    }
+    setRecurrenceError(null);
     const reminder = resolveReminder();
     if (reminder === 'invalid') {
       setReminderError('Add a reminder date and time, or choose a task date/time first.');
@@ -277,7 +301,9 @@ export default function AddTaskSheet({
             />
           </label>
 
-          {!hideRecurrence && <RecurrencePicker value={recurrenceValue} onChange={setRecurrenceValue} />}
+          {!hideRecurrence && (
+            <RecurrencePicker value={recurrenceValue} onChange={setRecurrenceValue} error={recurrenceError ?? undefined} />
+          )}
 
           <ReminderPicker
             value={reminderValue}

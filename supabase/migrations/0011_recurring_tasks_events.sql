@@ -43,6 +43,14 @@
 -- occurrence_date column so a recurring item's reminder can be marked
 -- delivered PER DATE instead of only once ever — see the report for how
 -- the push-reminders Edge Function uses this.
+--
+-- REVISION NOTE (post-review, this file has still never been applied):
+-- fixed a partial-unique-index backfill bug, added override uniqueness
+-- constraints, added recurring-task/event validation constraints, and
+-- hardened INSERT ownership checks on occurrence_skips/
+-- task_occurrence_completions to verify the referenced task/event
+-- actually belongs to the inserting user. See the accompanying report
+-- for the full list.
 -- ============================================================================
 
 
@@ -75,6 +83,65 @@ alter table public.tasks add column if not exists recurrence_occurrence_date dat
 create index if not exists tasks_recurrence_parent_id_idx
   on public.tasks (recurrence_parent_id) where recurrence_parent_id is not null;
 
+-- Fix #7 (review): a recurring task must have a due date to recur FROM;
+-- 'custom' recurrence must specify at least one weekday (a zero-length
+-- array is NOT the same as NULL to Postgres, and array_length() on an
+-- empty array returns NULL rather than 0 — a CHECK treats a NULL result
+-- as passing, so this explicitly coalesces to 0 to actually reject an
+-- empty selection, not just a missing one); and an end date can never
+-- be before the series' own start date.
+do $$
+begin
+  alter table public.tasks
+    add constraint tasks_recurring_requires_due_date
+    check (recurrence_type = 'none' or due_date is not null);
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter table public.tasks
+    add constraint tasks_custom_recurrence_requires_days
+    check (
+      recurrence_type <> 'custom'
+      or coalesce(array_length(recurrence_days_of_week, 1), 0) >= 1
+    );
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter table public.tasks
+    add constraint tasks_recurrence_end_not_before_start
+    check (recurrence_end_date is null or due_date is null or recurrence_end_date >= due_date);
+exception
+  when duplicate_object then null;
+end $$;
+
+-- Fix (final review, item 7): recurrence_parent_id and
+-- recurrence_occurrence_date must always be set together — a row is
+-- either an ordinary/series-parent task (both NULL) or an occurrence
+-- override (both set); one set without the other is meaningless and
+-- would break every lookup keyed on the pair.
+do $$
+begin
+  alter table public.tasks
+    add constraint tasks_recurrence_override_fields_paired
+    check ((recurrence_parent_id is null) = (recurrence_occurrence_date is null));
+exception
+  when duplicate_object then null;
+end $$;
+
+-- Fix #2 (review): there must never be more than one override for the
+-- same (series, occurrence date) pair — without this, two concurrent
+-- "edit this occurrence" saves (or a bug in the client) could otherwise
+-- silently create duplicate overrides for the same date.
+create unique index if not exists tasks_recurrence_override_unique_idx
+  on public.tasks (recurrence_parent_id, recurrence_occurrence_date)
+  where recurrence_parent_id is not null;
+
 -- Same three columns, same meaning, on calendar_events.
 alter table public.calendar_events add column if not exists recurrence_type text not null default 'none';
 do $$
@@ -94,6 +161,46 @@ alter table public.calendar_events add column if not exists recurrence_occurrenc
 
 create index if not exists calendar_events_recurrence_parent_id_idx
   on public.calendar_events (recurrence_parent_id) where recurrence_parent_id is not null;
+
+-- Fix #7 (review), applied equivalently to events: event_date is already
+-- NOT NULL on every event (0002_calendar_events.sql), so there's no
+-- separate "requires a start date" constraint needed here — but the
+-- other two rules apply identically to events.
+do $$
+begin
+  alter table public.calendar_events
+    add constraint calendar_events_custom_recurrence_requires_days
+    check (
+      recurrence_type <> 'custom'
+      or coalesce(array_length(recurrence_days_of_week, 1), 0) >= 1
+    );
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter table public.calendar_events
+    add constraint calendar_events_recurrence_end_not_before_start
+    check (recurrence_end_date is null or recurrence_end_date >= event_date);
+exception
+  when duplicate_object then null;
+end $$;
+
+-- Fix (final review, item 7), same reasoning as the tasks constraint above.
+do $$
+begin
+  alter table public.calendar_events
+    add constraint calendar_events_recurrence_override_fields_paired
+    check ((recurrence_parent_id is null) = (recurrence_occurrence_date is null));
+exception
+  when duplicate_object then null;
+end $$;
+
+-- Fix #2 (review), same reasoning as the tasks index above.
+create unique index if not exists calendar_events_recurrence_override_unique_idx
+  on public.calendar_events (recurrence_parent_id, recurrence_occurrence_date)
+  where recurrence_parent_id is not null;
 
 -- Existing rows are entirely unaffected: recurrence_type defaults to
 -- 'none' and every other new column defaults to NULL, so every
@@ -136,7 +243,19 @@ create policy "Occurrence skips are viewable by owner"
 drop policy if exists "Occurrence skips are insertable by owner" on public.occurrence_skips;
 create policy "Occurrence skips are insertable by owner"
   on public.occurrence_skips for insert
-  with check (auth.uid() = user_id);
+  with check (
+    auth.uid() = user_id
+    and (
+      (
+        task_id is not null
+        and exists (select 1 from public.tasks t where t.id = task_id and t.user_id = auth.uid())
+      )
+      or (
+        event_id is not null
+        and exists (select 1 from public.calendar_events e where e.id = event_id and e.user_id = auth.uid())
+      )
+    )
+  );
 
 drop policy if exists "Occurrence skips are deletable by owner" on public.occurrence_skips;
 create policy "Occurrence skips are deletable by owner"
@@ -174,7 +293,10 @@ create policy "Occurrence completions are viewable by owner"
 drop policy if exists "Occurrence completions are insertable by owner" on public.task_occurrence_completions;
 create policy "Occurrence completions are insertable by owner"
   on public.task_occurrence_completions for insert
-  with check (auth.uid() = user_id);
+  with check (
+    auth.uid() = user_id
+    and exists (select 1 from public.tasks t where t.id = task_id and t.user_id = auth.uid())
+  );
 
 drop policy if exists "Occurrence completions are deletable by owner" on public.task_occurrence_completions;
 create policy "Occurrence completions are deletable by owner"
@@ -200,13 +322,16 @@ grant select, insert, delete on public.task_occurrence_completions to authentica
 
 alter table public.reminder_deliveries add column if not exists occurrence_date date;
 
--- Backfill existing rows with the date portion of when they were
--- actually delivered, so the column can safely become NOT NULL — this
--- doesn't change what already happened, it just gives already-delivered
--- rows a real, non-null occurrence_date consistent with the new column's
--- meaning.
-update public.reminder_deliveries set occurrence_date = delivered_at::date
-  where occurrence_date is null;
+-- Backfill existing rows so the column can safely become NOT NULL. Uses
+-- the REMINDER's own remind_at date (fix from review) — NOT
+-- delivered_at, since delivery could happen shortly after midnight
+-- relative to when the reminder was actually due, which would silently
+-- assign the wrong occurrence_date to an already-delivered row.
+update public.reminder_deliveries d
+set occurrence_date = r.remind_at::date
+from public.reminders r
+where d.reminder_id = r.id
+  and d.occurrence_date is null;
 
 alter table public.reminder_deliveries alter column occurrence_date set not null;
 alter table public.reminder_deliveries alter column occurrence_date set default current_date;
@@ -224,11 +349,25 @@ create unique index if not exists reminder_deliveries_reminder_occurrence_idx
 -- join on BOTH reminder_id and that reminder's own remind_at date,
 -- which is exactly equivalent to the original behavior for an ordinary,
 -- non-recurring reminder (its remind_at date never changes, so this is
--- the same "sent once, ever" check as before) while remaining correct
--- once the push-reminders function separately re-checks recurring
--- reminders against each new occurrence date (see that function's own
--- comments for how it queries recurring reminders itself, outside this
--- view, since matching a recurrence rule isn't expressed here in SQL).
+-- the same "sent once, ever" check as before).
+--
+-- Fix (final review, item 2): this view now also EXCLUDES any reminder
+-- whose parent task/event is still recurring (recurrence_type <>
+-- 'none'). Previously such a reminder's fixed, in-the-past remind_at
+-- kept matching `remind_at <= now()` on every single cron run forever,
+-- so PASS 1 (this view) and PASS 2 (the Edge Function's own recurring-
+-- aware logic) were both independently attempting to claim/deliver the
+-- same reminder using two different occurrence_date computations — not
+-- a duplicate SEND (the atomic claim still prevented that), but two
+-- competing code paths for one reminder is exactly the inconsistency
+-- flagged in review. Excluding recurring parents' reminders here makes
+-- PASS 2 the SOLE owner of recurring-reminder delivery, so there is now
+-- exactly one dedup identity per reminder: (reminder_id, occurrence_date)
+-- computed by whichever single pass actually owns that reminder.
+-- Occurrence OVERRIDE rows are unaffected — their own recurrence_type is
+-- always 'none' (see 0011's architecture note), so their reminders
+-- continue to flow through this view exactly as an ordinary reminder
+-- always has.
 create or replace view public.due_unsent_reminders as
 select
   r.id as reminder_id,
@@ -240,8 +379,12 @@ select
 from public.reminders r
 left join public.reminder_deliveries d
   on d.reminder_id = r.id and d.occurrence_date = r.remind_at::date
+left join public.tasks t on t.id = r.task_id
+left join public.calendar_events e on e.id = r.event_id
 where r.remind_at <= now()
-  and d.id is null;
+  and d.id is null
+  and coalesce(t.recurrence_type, 'none') = 'none'
+  and coalesce(e.recurrence_type, 'none') = 'none';
 
 revoke all on public.due_unsent_reminders from anon, authenticated;
 grant select on public.due_unsent_reminders to service_role;

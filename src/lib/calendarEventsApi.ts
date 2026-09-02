@@ -132,25 +132,56 @@ export async function deleteEvent(eventId: string): Promise<void> {
 // Recurrence support (see supabase/migrations/0011_recurring_tasks_events.sql)
 // ---------------------------------------------------------------------------
 
-/** Creates a real, ordinary event row that overrides ONE occurrence of a recurring series. */
+/**
+ * Creates a real, ordinary event row that overrides ONE occurrence of a
+ * recurring series. If an override already exists for this exact
+ * (series, date) pair, it's UPDATED in place instead of inserting a
+ * second one — see createTaskOccurrenceOverride in tasksApi.ts for the
+ * same pattern and reasoning.
+ */
 export async function createEventOccurrenceOverride(
   userId: string,
   seriesId: string,
   occurrenceDate: string,
   input: EventInput,
 ): Promise<CalendarEvent> {
+  const { data: existing, error: findError } = await supabase
+    .from('calendar_events')
+    .select('id')
+    .eq('recurrence_parent_id', seriesId)
+    .eq('recurrence_occurrence_date', occurrenceDate)
+    .maybeSingle();
+
+  if (findError) throw toSupabaseError('Could not update this occurrence', findError);
+
+  const fields = {
+    title: input.title.trim(),
+    description: input.description?.trim() || null,
+    event_date: input.eventDate,
+    start_time: input.allDay ? null : input.startTime || null,
+    end_time: input.allDay ? null : input.endTime || null,
+    all_day: input.allDay,
+    location: input.location?.trim() || null,
+    event_type: input.eventType,
+  };
+
+  if (existing) {
+    const { data, error } = await supabase
+      .from('calendar_events')
+      .update(fields)
+      .eq('id', existing.id)
+      .select('*')
+      .single();
+
+    if (error) throw toSupabaseError('Could not update this occurrence', error);
+    return rowToEvent(data as CalendarEventRow);
+  }
+
   const { data, error } = await supabase
     .from('calendar_events')
     .insert({
       user_id: userId,
-      title: input.title.trim(),
-      description: input.description?.trim() || null,
-      event_date: input.eventDate,
-      start_time: input.allDay ? null : input.startTime || null,
-      end_time: input.allDay ? null : input.endTime || null,
-      all_day: input.allDay,
-      location: input.location?.trim() || null,
-      event_type: input.eventType,
+      ...fields,
       recurrence_type: 'none',
       recurrence_parent_id: seriesId,
       recurrence_occurrence_date: occurrenceDate,
@@ -162,19 +193,35 @@ export async function createEventOccurrenceOverride(
   return rowToEvent(data as CalendarEventRow);
 }
 
-/** Records "This occurrence" deleted, without touching the series or other occurrences. */
+/**
+ * Records "This occurrence" deleted, without touching the series or
+ * other occurrences. See skipTaskOccurrence in tasksApi.ts for why this
+ * uses select-then-insert instead of upsert(onConflict) — the same
+ * partial-unique-index limitation applies here identically.
+ */
 export async function skipEventOccurrence(
   userId: string,
   eventId: string,
   occurrenceDate: string,
 ): Promise<void> {
-  const { error } = await supabase
+  const { data: existing, error: findError } = await supabase
     .from('occurrence_skips')
-    .upsert(
-      { user_id: userId, event_id: eventId, occurrence_date: occurrenceDate },
-      { onConflict: 'event_id,occurrence_date' },
-    );
-  if (error) throw toSupabaseError('Could not remove this occurrence', error);
+    .select('id')
+    .eq('event_id', eventId)
+    .eq('occurrence_date', occurrenceDate)
+    .maybeSingle();
+
+  if (findError) throw toSupabaseError('Could not remove this occurrence', findError);
+  if (existing) return;
+
+  const { error: insertError } = await supabase
+    .from('occurrence_skips')
+    .insert({ user_id: userId, event_id: eventId, occurrence_date: occurrenceDate });
+
+  if (insertError) {
+    if (insertError.code === '23505') return;
+    throw toSupabaseError('Could not remove this occurrence', insertError);
+  }
 }
 
 /** All skipped event occurrences, as `${eventId}::${date}` keys. */

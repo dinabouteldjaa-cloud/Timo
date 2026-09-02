@@ -72,13 +72,16 @@ export default function PlanMyDayPage() {
   // single day, not just Mondays. A series parent is only included when
   // today is genuinely one of its occurrences, and not already
   // completed/removed for today specifically. Occurrence OVERRIDE rows
-  // (recurrenceParentId set) are unaffected — they're already concrete,
-  // dated, ordinary tasks and flow through exactly as before.
+  // (recurrenceParentId set) must only be eligible on their OWN actual
+  // occurrence date (fix, review item 10) — without this check, an
+  // override created for, say, next Monday would incorrectly appear in
+  // TODAY's candidate list too, since an override's own `status` never
+  // implies which date it belongs to on its own.
   const todaysTasks = useMemo(
     () =>
       tasks.filter((task) => {
         if (task.status === 'completed') return false;
-        if (task.recurrenceParentId) return true;
+        if (task.recurrenceParentId) return task.recurrenceOccurrenceDate === TODAY_ISO;
         if (task.recurrenceType !== 'none') {
           if (!isDateAnOccurrence(task, TODAY_ISO)) return false;
           const key = `${task.id}::${TODAY_ISO}`;

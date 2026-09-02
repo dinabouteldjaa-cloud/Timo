@@ -188,6 +188,12 @@ export async function updateTaskSchedule(
  * system — it's a completely normal task, just tagged with which series
  * and which date it stands in for, so the UI can prefer it over the
  * computed occurrence for that date.
+ *
+ * If an override already exists for this exact (series, date) pair — the
+ * user editing "this occurrence" a second time — that existing row is
+ * UPDATED in place rather than inserting a second one. A unique index on
+ * (recurrence_parent_id, recurrence_occurrence_date) also enforces this
+ * at the database level as a backstop.
  */
 export async function createTaskOccurrenceOverride(
   userId: string,
@@ -195,17 +201,42 @@ export async function createTaskOccurrenceOverride(
   occurrenceDate: string,
   input: TaskInput,
 ): Promise<Task> {
+  const { data: existing, error: findError } = await supabase
+    .from('tasks')
+    .select('id')
+    .eq('recurrence_parent_id', seriesId)
+    .eq('recurrence_occurrence_date', occurrenceDate)
+    .maybeSingle();
+
+  if (findError) throw toSupabaseError('Could not update this occurrence', findError);
+
+  const fields = {
+    title: input.title.trim(),
+    description: input.description?.trim() || null,
+    priority: input.priority,
+    category: input.category,
+    due_date: input.dueDate || null,
+    due_time: input.dueTime || null,
+    estimated_duration_minutes: input.estimatedMinutes ?? null,
+  };
+
+  if (existing) {
+    const { data, error } = await supabase
+      .from('tasks')
+      .update(fields)
+      .eq('id', existing.id)
+      .select('*')
+      .single();
+
+    if (error) throw toSupabaseError('Could not update this occurrence', error);
+    return rowToTask(data as TaskRow);
+  }
+
   const { data, error } = await supabase
     .from('tasks')
     .insert({
       user_id: userId,
-      title: input.title.trim(),
-      description: input.description?.trim() || null,
-      priority: input.priority,
-      category: input.category,
-      due_date: input.dueDate || null,
-      due_time: input.dueTime || null,
-      estimated_duration_minutes: input.estimatedMinutes ?? null,
+      ...fields,
       recurrence_type: 'none',
       recurrence_parent_id: seriesId,
       recurrence_occurrence_date: occurrenceDate,
@@ -253,19 +284,47 @@ export async function fetchTaskOccurrenceCompletions(userId: string): Promise<Se
   return new Set((data as { task_id: string; occurrence_date: string }[]).map((r) => `${r.task_id}::${r.occurrence_date}`));
 }
 
-/** Records "This occurrence" deleted, without touching the series or other occurrences. */
+/**
+ * Records "This occurrence" deleted, without touching the series or
+ * other occurrences.
+ *
+ * NOTE: deliberately does NOT use `.upsert(..., { onConflict })`. The
+ * "one skip per (task, date)" guarantee is enforced by a PARTIAL unique
+ * index (`... where task_id is not null` — see
+ * 0011_recurring_tasks_events.sql), and PostgREST's `onConflict` option
+ * can only generate a plain `ON CONFLICT (task_id, occurrence_date)`
+ * with no way to repeat that partial predicate, so Postgres can't match
+ * it to any constraint and rejects the request with 42P10 — exactly the
+ * same class of bug already found and fixed once before in
+ * remindersApi.ts. Select-then-update-or-insert works correctly with a
+ * partial unique index because it never asks Postgres to infer one.
+ */
 export async function skipTaskOccurrence(
   userId: string,
   taskId: string,
   occurrenceDate: string,
 ): Promise<void> {
-  const { error } = await supabase
+  const { data: existing, error: findError } = await supabase
     .from('occurrence_skips')
-    .upsert(
-      { user_id: userId, task_id: taskId, occurrence_date: occurrenceDate },
-      { onConflict: 'task_id,occurrence_date' },
-    );
-  if (error) throw toSupabaseError('Could not remove this occurrence', error);
+    .select('id')
+    .eq('task_id', taskId)
+    .eq('occurrence_date', occurrenceDate)
+    .maybeSingle();
+
+  if (findError) throw toSupabaseError('Could not remove this occurrence', findError);
+  if (existing) return; // already skipped — idempotent, nothing further to do
+
+  const { error: insertError } = await supabase
+    .from('occurrence_skips')
+    .insert({ user_id: userId, task_id: taskId, occurrence_date: occurrenceDate });
+
+  if (insertError) {
+    // 23505 = unique_violation — a concurrent call already inserted the
+    // same skip between our check and this insert; the partial unique
+    // index did its job, so this is a safe, expected no-op, not a failure.
+    if (insertError.code === '23505') return;
+    throw toSupabaseError('Could not remove this occurrence', insertError);
+  }
 }
 
 /** All skipped task occurrences, as `${taskId}::${date}` keys. */

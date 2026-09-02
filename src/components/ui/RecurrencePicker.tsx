@@ -36,9 +36,10 @@ const TYPE_OPTIONS: { key: RecurrenceType; label: string }[] = [
 interface RecurrencePickerProps {
   value: RecurrencePickerValue;
   onChange: (value: RecurrencePickerValue) => void;
+  error?: string;
 }
 
-export default function RecurrencePicker({ value, onChange }: RecurrencePickerProps) {
+export default function RecurrencePicker({ value, onChange, error }: RecurrencePickerProps) {
   function toggleDay(day: number) {
     const has = value.daysOfWeek.includes(day);
     onChange({
@@ -99,6 +100,8 @@ export default function RecurrencePicker({ value, onChange }: RecurrencePickerPr
           </div>
         </label>
       )}
+
+      {error && <span className="recurrence-picker__error">{error}</span>}
     </div>
   );
 }

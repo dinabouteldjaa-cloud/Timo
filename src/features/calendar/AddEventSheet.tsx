@@ -93,6 +93,7 @@ export default function AddEventSheet({
   const [titleTouched, setTitleTouched] = useState(false);
   const [dateTouched, setDateTouched] = useState(false);
   const [reminderError, setReminderError] = useState<string | null>(null);
+  const [recurrenceError, setRecurrenceError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const isEditing = Boolean(event);
 
@@ -104,6 +105,7 @@ export default function AddEventSheet({
       setTitleTouched(false);
       setDateTouched(false);
       setReminderError(null);
+      setRecurrenceError(null);
       setSaving(false);
     }
   }, [open, event, existingReminder, defaultDate]);
@@ -135,6 +137,22 @@ export default function AddEventSheet({
     };
   }
 
+  function validateRecurrence(): string | null {
+    if (hideRecurrence || recurrenceValue.type === 'none') return null;
+    // Mirrors calendar_events_custom_recurrence_requires_days /
+    // calendar_events_recurrence_end_not_before_start from
+    // 0011_recurring_tasks_events.sql. An event's date is already
+    // required by the existing title/date validation above, so there's
+    // no separate "needs a date" check here the way tasks need one.
+    if (recurrenceValue.type === 'custom' && recurrenceValue.daysOfWeek.length === 0) {
+      return 'Choose at least one day for a custom repeat.';
+    }
+    if (recurrenceValue.endDate && form.date && recurrenceValue.endDate < form.date) {
+      return "The end date can't be before the start date.";
+    }
+    return null;
+  }
+
   async function handleSave() {
     const titleInvalid = form.title.trim().length === 0;
     const dateInvalid = form.date.trim().length === 0;
@@ -143,6 +161,12 @@ export default function AddEventSheet({
       setDateTouched(true);
       return;
     }
+    const recurrenceValidationError = validateRecurrence();
+    if (recurrenceValidationError) {
+      setRecurrenceError(recurrenceValidationError);
+      return;
+    }
+    setRecurrenceError(null);
     const reminder = resolveReminder();
     if (reminder === 'invalid') {
       setReminderError('Add a reminder date and time, or choose an event start time first.');
@@ -297,7 +321,9 @@ export default function AddEventSheet({
             />
           </label>
 
-          {!hideRecurrence && <RecurrencePicker value={recurrenceValue} onChange={setRecurrenceValue} />}
+          {!hideRecurrence && (
+            <RecurrencePicker value={recurrenceValue} onChange={setRecurrenceValue} error={recurrenceError ?? undefined} />
+          )}
 
           <ReminderPicker
             value={reminderValue}

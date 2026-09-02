@@ -597,7 +597,11 @@ export default function CalendarPage() {
 
       <EventDetailsSheet
         open={Boolean(detailsEventOccurrence)}
-        event={detailsEventOccurrence?.event ?? null}
+        event={
+          detailsEventOccurrence
+            ? { ...detailsEventOccurrence.event, eventDate: detailsEventOccurrence.date }
+            : null
+        }
         reminder={
           detailsEventOccurrence
             ? reminders.find((r) => r.eventId === detailsEventOccurrence.event.id) ?? null
@@ -651,7 +655,11 @@ export default function CalendarPage() {
 
       <TaskDetailsSheet
         open={Boolean(detailsTaskOccurrence)}
-        task={detailsTaskOccurrence?.task ?? null}
+        task={
+          detailsTaskOccurrence
+            ? { ...detailsTaskOccurrence.task, dueDate: detailsTaskOccurrence.date }
+            : null
+        }
         reminder={
           detailsTaskOccurrence
             ? reminders.find((r) => r.taskId === detailsTaskOccurrence.task.id) ?? null
