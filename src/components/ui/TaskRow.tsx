@@ -11,11 +11,13 @@ interface TaskRowProps {
   onToggle?: (id: string) => void;
   onOpen?: (task: Task) => void;
   hasReminder?: boolean;
-  /** Shows a small, subdued "Overdue" label — deliberately understated, not an alert/warning style. */
+  /** Shows a small coral "Overdue" label and a subtle warm row accent. */
   overdue?: boolean;
+  /** Optional date context shown before time/category, e.g. "Tomorrow" or "Sep 5" — used by Upcoming, where the date isn't otherwise implied by which list the row is in. */
+  dateLabel?: string;
 }
 
-export default function TaskRow({ task, onToggle, onOpen, hasReminder, overdue }: TaskRowProps) {
+export default function TaskRow({ task, onToggle, onOpen, hasReminder, overdue, dateLabel }: TaskRowProps) {
   const { t } = useLocale();
   const done = task.status === 'completed';
 
@@ -29,6 +31,7 @@ export default function TaskRow({ task, onToggle, onOpen, hasReminder, overdue }
   // reads naturally (e.g. "19:00 • Personal" or "1h 20m • Work") — no
   // dangling/standalone separators appear when a field is missing.
   const metaParts: string[] = [];
+  if (dateLabel) metaParts.push(dateLabel);
   if (isScheduledToday) {
     metaParts.push(`${task.scheduledStartTime}–${task.scheduledEndTime}`);
   } else if (task.dueTime) {
@@ -53,7 +56,7 @@ export default function TaskRow({ task, onToggle, onOpen, hasReminder, overdue }
 
   return (
     <div
-      className={`task-row ${done ? 'task-row--done' : ''} ${onOpen ? 'task-row--clickable' : ''}`}
+      className={`task-row ${done ? 'task-row--done' : ''} ${onOpen ? 'task-row--clickable' : ''} ${overdue ? 'task-row--overdue' : ''}`}
       onClick={handleOpen}
       onKeyDown={handleKeyDown}
       role={onOpen ? 'button' : undefined}
@@ -97,7 +100,7 @@ export default function TaskRow({ task, onToggle, onOpen, hasReminder, overdue }
         <p className="task-row__meta">{metaParts.join(' • ')}</p>
       </div>
       <div className="task-row__badges">
-        {overdue && <Badge tone="neutral">{t.tasks.filterOverdue}</Badge>}
+        {overdue && <Badge tone="overdue">{t.tasks.filterOverdue}</Badge>}
         <Badge tone={task.priority}>{t.priority[task.priority]}</Badge>
       </div>
     </div>

@@ -19,6 +19,23 @@
   border-top: 1px solid var(--color-border-soft);
 }
 
+.task-row--overdue {
+  position: relative;
+  padding-left: var(--space-3);
+  margin-left: calc(-1 * var(--space-3));
+}
+
+.task-row--overdue::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: var(--space-3);
+  bottom: var(--space-3);
+  width: 3px;
+  border-radius: 2px;
+  background: var(--color-overdue);
+}
+
 .task-row__checkbox-wrap {
   display: flex;
 }
