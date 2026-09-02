@@ -1,11 +1,12 @@
 import { supabase } from './supabaseClient';
 import { toSupabaseError } from './supabaseErrors';
-import type { Task, TaskCategory, TaskPriority, TaskStatus } from '../types/task';
+import type { RecurrenceType, Task, TaskCategory, TaskPriority, TaskStatus } from '../types/task';
 
 // ---------------------------------------------------------------------------
-// Supabase `tasks` row shape (snake_case, matches supabase/migrations/0001_init.sql)
-// and mapping to/from the app's `Task` type so the rest of the app never has
-// to deal with the DB's column naming.
+// Supabase `tasks` row shape (snake_case, matches supabase/migrations/0001_init.sql
+// plus recurrence columns from 0011_recurring_tasks_events.sql) and mapping
+// to/from the app's `Task` type so the rest of the app never has to deal
+// with the DB's column naming.
 // ---------------------------------------------------------------------------
 
 interface TaskRow {
@@ -22,6 +23,11 @@ interface TaskRow {
   scheduled_date: string | null;
   scheduled_start_time: string | null;
   scheduled_end_time: string | null;
+  recurrence_type: RecurrenceType;
+  recurrence_days_of_week: number[] | null;
+  recurrence_end_date: string | null;
+  recurrence_parent_id: string | null;
+  recurrence_occurrence_date: string | null;
   completed_at: string | null;
   created_at: string;
   updated_at: string;
@@ -42,6 +48,11 @@ function rowToTask(row: TaskRow): Task {
     scheduledDate: row.scheduled_date ?? undefined,
     scheduledStartTime: row.scheduled_start_time ? row.scheduled_start_time.slice(0, 5) : undefined,
     scheduledEndTime: row.scheduled_end_time ? row.scheduled_end_time.slice(0, 5) : undefined,
+    recurrenceType: row.recurrence_type ?? 'none',
+    recurrenceDaysOfWeek: row.recurrence_days_of_week ?? undefined,
+    recurrenceEndDate: row.recurrence_end_date ?? undefined,
+    recurrenceParentId: row.recurrence_parent_id ?? undefined,
+    recurrenceOccurrenceDate: row.recurrence_occurrence_date ?? undefined,
   };
 }
 
@@ -53,6 +64,11 @@ export interface TaskInput {
   priority: TaskPriority;
   category: TaskCategory;
   estimatedMinutes?: number;
+  // Recurrence — all optional; omitted/undefined means 'none' (an
+  // ordinary, non-recurring task), matching the DB column's own default.
+  recurrenceType?: RecurrenceType;
+  recurrenceDaysOfWeek?: number[];
+  recurrenceEndDate?: string;
 }
 
 export async function fetchTasks(userId: string): Promise<Task[]> {
@@ -78,6 +94,9 @@ export async function createTask(userId: string, input: TaskInput): Promise<Task
       due_date: input.dueDate || null,
       due_time: input.dueTime || null,
       estimated_duration_minutes: input.estimatedMinutes ?? null,
+      recurrence_type: input.recurrenceType ?? 'none',
+      recurrence_days_of_week: input.recurrenceDaysOfWeek ?? null,
+      recurrence_end_date: input.recurrenceEndDate || null,
     })
     .select('*')
     .single();
@@ -100,6 +119,9 @@ export async function updateTask(
       due_date: input.dueDate || null,
       due_time: input.dueTime || null,
       estimated_duration_minutes: input.estimatedMinutes ?? null,
+      recurrence_type: input.recurrenceType ?? 'none',
+      recurrence_days_of_week: input.recurrenceDaysOfWeek ?? null,
+      recurrence_end_date: input.recurrenceEndDate || null,
     })
     .eq('id', taskId)
     .select('*')
@@ -154,4 +176,106 @@ export async function updateTaskSchedule(
 
   if (error) throw toSupabaseError('Could not schedule task', error);
   return rowToTask(data as TaskRow);
+}
+
+// ---------------------------------------------------------------------------
+// Recurrence support (see supabase/migrations/0011_recurring_tasks_events.sql)
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates a real, ordinary task row that overrides ONE occurrence of a
+ * recurring series ("Edit this occurrence"). This is not a second task
+ * system — it's a completely normal task, just tagged with which series
+ * and which date it stands in for, so the UI can prefer it over the
+ * computed occurrence for that date.
+ */
+export async function createTaskOccurrenceOverride(
+  userId: string,
+  seriesId: string,
+  occurrenceDate: string,
+  input: TaskInput,
+): Promise<Task> {
+  const { data, error } = await supabase
+    .from('tasks')
+    .insert({
+      user_id: userId,
+      title: input.title.trim(),
+      description: input.description?.trim() || null,
+      priority: input.priority,
+      category: input.category,
+      due_date: input.dueDate || null,
+      due_time: input.dueTime || null,
+      estimated_duration_minutes: input.estimatedMinutes ?? null,
+      recurrence_type: 'none',
+      recurrence_parent_id: seriesId,
+      recurrence_occurrence_date: occurrenceDate,
+    })
+    .select('*')
+    .single();
+
+  if (error) throw toSupabaseError('Could not update this occurrence', error);
+  return rowToTask(data as TaskRow);
+}
+
+/** Marks one occurrence of a recurring task complete without touching the series. */
+export async function completeTaskOccurrence(
+  userId: string,
+  taskId: string,
+  occurrenceDate: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('task_occurrence_completions')
+    .upsert(
+      { user_id: userId, task_id: taskId, occurrence_date: occurrenceDate },
+      { onConflict: 'task_id,occurrence_date' },
+    );
+  if (error) throw toSupabaseError('Could not complete this occurrence', error);
+}
+
+/** Reverses completeTaskOccurrence for one date. */
+export async function uncompleteTaskOccurrence(taskId: string, occurrenceDate: string): Promise<void> {
+  const { error } = await supabase
+    .from('task_occurrence_completions')
+    .delete()
+    .eq('task_id', taskId)
+    .eq('occurrence_date', occurrenceDate);
+  if (error) throw toSupabaseError('Could not undo this completion', error);
+}
+
+/** All (taskId, occurrenceDate) pairs the user has completed, as `${taskId}::${date}` keys. */
+export async function fetchTaskOccurrenceCompletions(userId: string): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from('task_occurrence_completions')
+    .select('task_id, occurrence_date')
+    .eq('user_id', userId);
+
+  if (error) throw toSupabaseError('Could not load task completions', error);
+  return new Set((data as { task_id: string; occurrence_date: string }[]).map((r) => `${r.task_id}::${r.occurrence_date}`));
+}
+
+/** Records "This occurrence" deleted, without touching the series or other occurrences. */
+export async function skipTaskOccurrence(
+  userId: string,
+  taskId: string,
+  occurrenceDate: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('occurrence_skips')
+    .upsert(
+      { user_id: userId, task_id: taskId, occurrence_date: occurrenceDate },
+      { onConflict: 'task_id,occurrence_date' },
+    );
+  if (error) throw toSupabaseError('Could not remove this occurrence', error);
+}
+
+/** All skipped task occurrences, as `${taskId}::${date}` keys. */
+export async function fetchTaskOccurrenceSkips(userId: string): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from('occurrence_skips')
+    .select('task_id, occurrence_date')
+    .eq('user_id', userId)
+    .not('task_id', 'is', null);
+
+  if (error) throw toSupabaseError('Could not load skipped occurrences', error);
+  return new Set((data as { task_id: string; occurrence_date: string }[]).map((r) => `${r.task_id}::${r.occurrence_date}`));
 }

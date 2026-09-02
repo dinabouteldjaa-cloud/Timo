@@ -220,6 +220,13 @@
   vertical-align: -1px;
 }
 
+.calendar-event-row__recurring {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--color-text-faint);
+}
+
 .calendar-event-row--clickable {
   width: 100%;
   border: none;

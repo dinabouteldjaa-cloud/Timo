@@ -4,6 +4,10 @@ import ReminderPicker, {
   emptyReminderValue,
   type ReminderPickerValue,
 } from '../../components/ui/ReminderPicker';
+import RecurrencePicker, {
+  emptyRecurrenceValue,
+  type RecurrencePickerValue,
+} from '../../components/ui/RecurrencePicker';
 import { useLocale } from '../../i18n/LocaleContext';
 import type { NewTaskInput, ReminderSelection } from '../../state/AppStateContext';
 import { computeRemindAt, minutesForPreset, presetForOffset } from '../../lib/reminderPresets';
@@ -18,6 +22,14 @@ interface AddTaskSheetProps {
   onClose: () => void;
   onSave: (input: NewTaskInput) => void | Promise<void>;
   onDelete?: () => void | Promise<void>;
+  /**
+   * True when this sheet is creating/editing a single occurrence override
+   * of a recurring series ("Edit this occurrence") rather than an
+   * ordinary task or the series itself — an occurrence override is
+   * always non-recurring, so the Repeat picker doesn't apply and is
+   * hidden entirely.
+   */
+  hideRecurrence?: boolean;
 }
 
 const priorities: TaskPriority[] = ['low', 'medium', 'high'];
@@ -55,6 +67,15 @@ function reminderValueFromExisting(reminder?: Reminder | null): ReminderPickerVa
   };
 }
 
+function recurrenceValueFromTask(task?: Task | null): RecurrencePickerValue {
+  if (!task) return emptyRecurrenceValue();
+  return {
+    type: task.recurrenceType ?? 'none',
+    daysOfWeek: task.recurrenceDaysOfWeek ?? [],
+    endDate: task.recurrenceEndDate ?? '',
+  };
+}
+
 export default function AddTaskSheet({
   open,
   task,
@@ -62,11 +83,15 @@ export default function AddTaskSheet({
   onClose,
   onSave,
   onDelete,
+  hideRecurrence,
 }: AddTaskSheetProps) {
   const { t } = useLocale();
   const [form, setForm] = useState(task ? formFromTask(task) : emptyForm);
   const [reminderValue, setReminderValue] = useState<ReminderPickerValue>(
     reminderValueFromExisting(existingReminder),
+  );
+  const [recurrenceValue, setRecurrenceValue] = useState<RecurrencePickerValue>(
+    recurrenceValueFromTask(task),
   );
   const [titleTouched, setTitleTouched] = useState(false);
   const [reminderError, setReminderError] = useState<string | null>(null);
@@ -77,6 +102,7 @@ export default function AddTaskSheet({
     if (open) {
       setForm(task ? formFromTask(task) : emptyForm);
       setReminderValue(reminderValueFromExisting(existingReminder));
+      setRecurrenceValue(recurrenceValueFromTask(task));
       setTitleTouched(false);
       setReminderError(null);
       setSaving(false);
@@ -130,6 +156,10 @@ export default function AddTaskSheet({
         category: form.category,
         estimatedMinutes: form.duration ? Number(form.duration) : undefined,
         reminder,
+        recurrenceType: hideRecurrence ? 'none' : recurrenceValue.type,
+        recurrenceDaysOfWeek:
+          !hideRecurrence && recurrenceValue.type === 'custom' ? recurrenceValue.daysOfWeek : undefined,
+        recurrenceEndDate: !hideRecurrence && recurrenceValue.endDate ? recurrenceValue.endDate : undefined,
       });
     } finally {
       setSaving(false);
@@ -246,6 +276,8 @@ export default function AddTaskSheet({
               onChange={(e) => setForm((f) => ({ ...f, duration: e.target.value }))}
             />
           </label>
+
+          {!hideRecurrence && <RecurrencePicker value={recurrenceValue} onChange={setRecurrenceValue} />}
 
           <ReminderPicker
             value={reminderValue}

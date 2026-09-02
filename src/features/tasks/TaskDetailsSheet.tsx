@@ -24,6 +24,19 @@ interface TaskDetailsSheetProps {
   onEdit: () => void;
   onDelete: () => void | Promise<void>;
   onStartFocus?: () => void;
+  /** e.g. "Every Monday", "Daily", "Sun, Tue, Thu" — null/omitted for a non-recurring task. */
+  recurrenceLabel?: string | null;
+  /**
+   * True when the task being viewed is one occurrence of a recurring
+   * series (rather than an ordinary task) — switches Edit/Delete to offer
+   * "This occurrence" vs "Entire series" instead of acting immediately.
+   * When false/omitted, behavior is completely unchanged from before.
+   */
+  isRecurringOccurrence?: boolean;
+  onEditOccurrence?: () => void;
+  onEditSeries?: () => void;
+  onDeleteOccurrence?: () => void | Promise<void>;
+  onDeleteSeries?: () => void | Promise<void>;
 }
 
 export default function TaskDetailsSheet({
@@ -34,15 +47,25 @@ export default function TaskDetailsSheet({
   onEdit,
   onDelete,
   onStartFocus,
+  recurrenceLabel,
+  isRecurringOccurrence,
+  onEditOccurrence,
+  onEditSeries,
+  onDeleteOccurrence,
+  onDeleteSeries,
 }: TaskDetailsSheetProps) {
   const { t } = useLocale();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [editChoiceOpen, setEditChoiceOpen] = useState(false);
+  const [deleteChoiceOpen, setDeleteChoiceOpen] = useState(false);
 
   useEffect(() => {
     if (open) {
       setConfirmingDelete(false);
       setDeleting(false);
+      setEditChoiceOpen(false);
+      setDeleteChoiceOpen(false);
     }
   }, [open, task]);
 
@@ -56,10 +79,49 @@ export default function TaskDetailsSheet({
       }).format(new Date(`${task.dueDate}T00:00:00`))
     : null;
 
+  const offersThisOccurrenceChoice =
+    isRecurringOccurrence && onEditOccurrence && onEditSeries && onDeleteOccurrence && onDeleteSeries;
+
+  function handleEditTap() {
+    if (offersThisOccurrenceChoice) {
+      setEditChoiceOpen(true);
+    } else {
+      onEdit();
+    }
+  }
+
+  function handleDeleteTap() {
+    if (offersThisOccurrenceChoice) {
+      setDeleteChoiceOpen(true);
+    } else {
+      setConfirmingDelete(true);
+    }
+  }
+
   async function handleConfirmDelete() {
     setDeleting(true);
     try {
       await onDelete();
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function handleDeleteSeriesChoice() {
+    if (!onDeleteSeries) return;
+    setDeleting(true);
+    try {
+      await onDeleteSeries();
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function handleDeleteOccurrenceChoice() {
+    if (!onDeleteOccurrence) return;
+    setDeleting(true);
+    try {
+      await onDeleteOccurrence();
     } finally {
       setDeleting(false);
     }
@@ -83,6 +145,8 @@ export default function TaskDetailsSheet({
             </p>
             <Badge tone={task.priority}>{t.priority[task.priority]}</Badge>
           </div>
+
+          {recurrenceLabel && <p className="task-details-recurrence">↻ {recurrenceLabel}</p>}
 
           {onStartFocus && task.status !== 'completed' && (
             <div className="task-details-focus-row">
@@ -150,6 +214,40 @@ export default function TaskDetailsSheet({
             </div>
           )}
 
+          {editChoiceOpen && (
+            <div className="task-details-confirm">
+              <p className="task-details-confirm__text">Edit just this occurrence, or the whole series?</p>
+              <div className="task-details-confirm__actions">
+                <Button variant="ghost" fullWidth onClick={() => setEditChoiceOpen(false)}>
+                  Cancel
+                </Button>
+                <Button variant="secondary" fullWidth onClick={onEditOccurrence}>
+                  This occurrence
+                </Button>
+                <Button fullWidth onClick={onEditSeries}>
+                  Entire series
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {deleteChoiceOpen && (
+            <div className="task-details-confirm">
+              <p className="task-details-confirm__text">Remove just this occurrence, or the whole series?</p>
+              <div className="task-details-confirm__actions">
+                <Button variant="ghost" fullWidth onClick={() => setDeleteChoiceOpen(false)} disabled={deleting}>
+                  Cancel
+                </Button>
+                <Button variant="secondary" fullWidth onClick={handleDeleteOccurrenceChoice} disabled={deleting}>
+                  This occurrence
+                </Button>
+                <Button variant="danger" fullWidth onClick={handleDeleteSeriesChoice} disabled={deleting}>
+                  {deleting ? 'Deleting…' : 'Entire series'}
+                </Button>
+              </div>
+            </div>
+          )}
+
           {confirmingDelete && (
             <div className="task-details-confirm">
               <p className="task-details-confirm__text">Delete this task? This can't be undone.</p>
@@ -170,12 +268,12 @@ export default function TaskDetailsSheet({
           )}
         </div>
 
-        {!confirmingDelete && (
+        {!confirmingDelete && !editChoiceOpen && !deleteChoiceOpen && (
           <div className="task-details-sheet__footer">
-            <Button variant="danger" fullWidth onClick={() => setConfirmingDelete(true)}>
+            <Button variant="danger" fullWidth onClick={handleDeleteTap}>
               Delete
             </Button>
-            <Button fullWidth onClick={onEdit}>
+            <Button fullWidth onClick={handleEditTap}>
               Edit
             </Button>
           </div>

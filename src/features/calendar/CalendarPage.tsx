@@ -5,8 +5,10 @@ import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
 import IconButton from '../../components/ui/IconButton';
 import { useLocale } from '../../i18n/LocaleContext';
-import { useAppState } from '../../state/AppStateContext';
+import { useAppState, type NewEventInput, type NewTaskInput } from '../../state/AppStateContext';
 import { addDays, getWeekDates, parseISODate, toISODate } from '../../lib/utils';
+import { expandTaskOccurrences, expandEventOccurrences, type TaskOccurrence, type EventOccurrence } from '../../lib/occurrences';
+import { describeRecurrence } from '../../lib/recurrence';
 import type { CalendarEvent, Task } from '../../types/task';
 import AddEventSheet from './AddEventSheet';
 import EventDetailsSheet from './EventDetailsSheet';
@@ -20,8 +22,8 @@ type View = 'month' | 'week' | 'day';
 // with a due date, shown side by side but never stored together — tasks
 // stay in `tasks`, events stay in `calendar_events`.
 type AgendaItem =
-  | { kind: 'event'; sortKey: number; event: CalendarEvent }
-  | { kind: 'task'; sortKey: number; task: Task };
+  | { kind: 'event'; sortKey: number; occurrence: EventOccurrence }
+  | { kind: 'task'; sortKey: number; occurrence: TaskOccurrence };
 
 const TODAY_ISO = toISODate(new Date());
 
@@ -77,9 +79,16 @@ export default function CalendarPage() {
     addEvent,
     updateEvent,
     deleteEvent,
+    deleteEventOccurrence,
+    saveEventOccurrenceOverride,
+    eventOccurrenceSkips,
     tasks,
     updateTask,
     deleteTask,
+    deleteTaskOccurrence,
+    saveTaskOccurrenceOverride,
+    taskOccurrenceCompletions,
+    taskOccurrenceSkips,
     reminders,
     selectFocusTask,
   } = useAppState();
@@ -89,52 +98,93 @@ export default function CalendarPage() {
 
   const [eventSheetOpen, setEventSheetOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
-  const [detailsEvent, setDetailsEvent] = useState<CalendarEvent | null>(null);
+  const [eventSheetHidesRecurrence, setEventSheetHidesRecurrence] = useState(false);
+  const [eventOverrideContext, setEventOverrideContext] = useState<{ seriesId: string; date: string } | null>(null);
+  const [detailsEventOccurrence, setDetailsEventOccurrence] = useState<EventOccurrence | null>(null);
 
   const [taskSheetOpen, setTaskSheetOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [detailsTask, setDetailsTask] = useState<Task | null>(null);
+  const [taskSheetHidesRecurrence, setTaskSheetHidesRecurrence] = useState(false);
+  const [taskOverrideContext, setTaskOverrideContext] = useState<{ seriesId: string; date: string } | null>(null);
+  const [detailsTaskOccurrence, setDetailsTaskOccurrence] = useState<TaskOccurrence | null>(null);
 
   const referenceMonth = parseISODate(selectedDate);
   const cells = buildMonthGrid(referenceMonth);
   const weekDates = getWeekDates(selectedDate);
 
+  // The calendar month currently on screen — used to expand recurring
+  // series into concrete dates for dot indicators and the agenda. Padded
+  // by a few days on each side so a week that spans a month boundary
+  // still gets correct dots for the days it shares with this month.
+  const monthRangeStart = toISODate(new Date(referenceMonth.getFullYear(), referenceMonth.getMonth(), 1 - 7));
+  const monthRangeEnd = toISODate(new Date(referenceMonth.getFullYear(), referenceMonth.getMonth() + 1, 7));
+
+  const expandedTasks = useMemo(
+    () => expandTaskOccurrences(tasks, monthRangeStart, monthRangeEnd, taskOccurrenceCompletions, taskOccurrenceSkips),
+    [tasks, monthRangeStart, monthRangeEnd, taskOccurrenceCompletions, taskOccurrenceSkips],
+  );
+  const expandedEvents = useMemo(
+    () => expandEventOccurrences(events, monthRangeStart, monthRangeEnd, eventOccurrenceSkips),
+    [events, monthRangeStart, monthRangeEnd, eventOccurrenceSkips],
+  );
+
   // Union of dates that have a calendar event OR a task due — used for the
-  // small dot indicators in Month/Week views.
+  // small dot indicators in Month/Week views. Now includes every expanded
+  // recurring occurrence, not just each series' own stored start date.
   const markedDates = useMemo(() => {
-    const set = new Set(events.map((e) => e.eventDate));
+    const set = new Set(expandedEvents.map((e) => e.date));
+    expandedTasks.forEach((t) => set.add(t.date));
     tasks.forEach((task) => {
-      if (task.dueDate) set.add(task.dueDate);
       if (task.scheduledDate) set.add(task.scheduledDate);
     });
     return set;
-  }, [events, tasks]);
+  }, [expandedEvents, expandedTasks, tasks]);
 
   const agendaItems = useMemo<AgendaItem[]>(() => {
-    const eventItems: AgendaItem[] = events
-      .filter((event) => event.eventDate === selectedDate)
-      .map((event) => ({
+    const eventItems: AgendaItem[] = expandedEvents
+      .filter((occ) => occ.date === selectedDate)
+      .map((occ) => ({
         kind: 'event' as const,
-        event,
-        sortKey: event.allDay || !event.startTime ? -1 : toMinutes(event.startTime),
+        occurrence: occ,
+        sortKey: occ.event.allDay || !occ.event.startTime ? -1 : toMinutes(occ.event.startTime),
       }));
 
-    const taskItems: AgendaItem[] = tasks
-      .filter(
-        (task) => task.dueDate === selectedDate || task.scheduledDate === selectedDate,
-      )
-      .map((task) => {
-        const scheduledForThisDay = task.scheduledDate === selectedDate && task.scheduledStartTime;
-        const displayTime = scheduledForThisDay ? task.scheduledStartTime : task.dueTime;
+    const taskItems: AgendaItem[] = expandedTasks
+      .filter((occ) => occ.date === selectedDate)
+      .map((occ) => {
+        const scheduledForThisDay = occ.task.scheduledDate === selectedDate && occ.task.scheduledStartTime;
+        const displayTime = scheduledForThisDay ? occ.task.scheduledStartTime : occ.task.dueTime;
         return {
           kind: 'task' as const,
-          task,
+          occurrence: occ,
           sortKey: displayTime ? toMinutes(displayTime) : 24 * 60,
         };
       });
 
-    return [...eventItems, ...taskItems].sort((a, b) => a.sortKey - b.sortKey);
-  }, [events, tasks, selectedDate]);
+    // Also include scheduled-but-not-otherwise-occurring tasks (Plan My
+    // Day placements) for this date, same as before.
+    const scheduledOnly: AgendaItem[] = tasks
+      .filter(
+        (task) =>
+          task.scheduledDate === selectedDate &&
+          !expandedTasks.some((occ) => occ.seriesId === task.id && occ.date === selectedDate) &&
+          task.dueDate !== selectedDate,
+      )
+      .map((task) => ({
+        kind: 'task' as const,
+        occurrence: {
+          virtualId: `${task.id}::${selectedDate}`,
+          date: selectedDate,
+          task,
+          seriesId: task.id,
+          isRecurring: false,
+          completed: task.status === 'completed',
+        },
+        sortKey: task.scheduledStartTime ? toMinutes(task.scheduledStartTime) : 24 * 60,
+      }));
+
+    return [...eventItems, ...taskItems, ...scheduledOnly].sort((a, b) => a.sortKey - b.sortKey);
+  }, [expandedEvents, expandedTasks, tasks, selectedDate]);
 
   const agendaLabel = new Intl.DateTimeFormat('en-US', {
     weekday: 'long',
@@ -144,54 +194,136 @@ export default function CalendarPage() {
 
   function openAdd() {
     setEditingEvent(null);
+    setEventSheetHidesRecurrence(false);
+    setEventOverrideContext(null);
     setEventSheetOpen(true);
   }
 
-  function openEventDetails(event: CalendarEvent) {
-    setDetailsEvent(event);
+  function openEventDetails(occurrence: EventOccurrence) {
+    setDetailsEventOccurrence(occurrence);
   }
 
   function closeEventDetails() {
-    setDetailsEvent(null);
+    setDetailsEventOccurrence(null);
   }
 
-  function editEventFromDetails() {
-    if (!detailsEvent) return;
-    setEditingEvent(detailsEvent);
-    setDetailsEvent(null);
+  /** "Entire series" edit — always edits the series' own stored row, whichever date is currently viewed. */
+  function editEventSeries() {
+    if (!detailsEventOccurrence) return;
+    const series = events.find((e) => e.id === detailsEventOccurrence.seriesId) ?? detailsEventOccurrence.event;
+    setEditingEvent(series);
+    setEventSheetHidesRecurrence(false);
+    setEventOverrideContext(null);
+    setDetailsEventOccurrence(null);
     setEventSheetOpen(true);
+  }
+
+  /** "This occurrence" edit — prefills with this occurrence's effective data, anchored to its own date. */
+  function editEventOccurrence() {
+    if (!detailsEventOccurrence) return;
+    const occ = detailsEventOccurrence;
+    setEditingEvent({ ...occ.event, eventDate: occ.date });
+    setEventSheetHidesRecurrence(true);
+    setEventOverrideContext({ seriesId: occ.seriesId, date: occ.date });
+    setDetailsEventOccurrence(null);
+    setEventSheetOpen(true);
+  }
+
+  async function deleteEventSeries() {
+    if (!detailsEventOccurrence) return;
+    await deleteEvent(detailsEventOccurrence.seriesId);
+    setDetailsEventOccurrence(null);
+  }
+
+  async function deleteEventOccurrenceChoice() {
+    if (!detailsEventOccurrence) return;
+    const occ = detailsEventOccurrence;
+    const overrideId = occ.event.recurrenceParentId ? occ.event.id : undefined;
+    await deleteEventOccurrence(occ.seriesId, occ.date, overrideId);
+    setDetailsEventOccurrence(null);
   }
 
   function closeEventSheet() {
     setEventSheetOpen(false);
     setEditingEvent(null);
+    setEventSheetHidesRecurrence(false);
+    setEventOverrideContext(null);
   }
 
-  function openTaskDetails(task: Task) {
-    setDetailsTask(task);
+  async function handleEventSheetSave(input: NewEventInput) {
+    if (eventOverrideContext) {
+      await saveEventOccurrenceOverride(eventOverrideContext.seriesId, eventOverrideContext.date, input);
+    } else if (editingEvent) {
+      await updateEvent(editingEvent.id, input);
+    } else {
+      await addEvent(input);
+    }
+    closeEventSheet();
+  }
+
+  function openTaskDetails(occurrence: TaskOccurrence) {
+    setDetailsTaskOccurrence(occurrence);
   }
 
   function closeTaskDetails() {
-    setDetailsTask(null);
+    setDetailsTaskOccurrence(null);
   }
 
-  function editTaskFromDetails() {
-    if (!detailsTask) return;
-    setEditingTask(detailsTask);
-    setDetailsTask(null);
+  function editTaskSeries() {
+    if (!detailsTaskOccurrence) return;
+    const series = tasks.find((tsk) => tsk.id === detailsTaskOccurrence.seriesId) ?? detailsTaskOccurrence.task;
+    setEditingTask(series);
+    setTaskSheetHidesRecurrence(false);
+    setTaskOverrideContext(null);
+    setDetailsTaskOccurrence(null);
     setTaskSheetOpen(true);
   }
 
+  function editTaskOccurrence() {
+    if (!detailsTaskOccurrence) return;
+    const occ = detailsTaskOccurrence;
+    setEditingTask({ ...occ.task, dueDate: occ.date });
+    setTaskSheetHidesRecurrence(true);
+    setTaskOverrideContext({ seriesId: occ.seriesId, date: occ.date });
+    setDetailsTaskOccurrence(null);
+    setTaskSheetOpen(true);
+  }
+
+  async function deleteTaskSeries() {
+    if (!detailsTaskOccurrence) return;
+    await deleteTask(detailsTaskOccurrence.seriesId);
+    setDetailsTaskOccurrence(null);
+  }
+
+  async function deleteTaskOccurrenceChoice() {
+    if (!detailsTaskOccurrence) return;
+    const occ = detailsTaskOccurrence;
+    const overrideId = occ.task.recurrenceParentId ? occ.task.id : undefined;
+    await deleteTaskOccurrence(occ.seriesId, occ.date, overrideId);
+    setDetailsTaskOccurrence(null);
+  }
+
   function startFocusFromDetails() {
-    if (!detailsTask) return;
-    selectFocusTask(detailsTask.id);
-    setDetailsTask(null);
+    if (!detailsTaskOccurrence) return;
+    selectFocusTask(detailsTaskOccurrence.task.id);
+    setDetailsTaskOccurrence(null);
     navigate('/focus');
   }
 
   function closeTaskSheet() {
     setTaskSheetOpen(false);
     setEditingTask(null);
+    setTaskSheetHidesRecurrence(false);
+    setTaskOverrideContext(null);
+  }
+
+  async function handleTaskSheetSave(input: NewTaskInput) {
+    if (taskOverrideContext) {
+      await saveTaskOccurrenceOverride(taskOverrideContext.seriesId, taskOverrideContext.date, input);
+    } else if (editingTask) {
+      await updateTask(editingTask.id, input);
+    }
+    closeTaskSheet();
   }
 
   return (
@@ -257,11 +389,15 @@ export default function CalendarPage() {
                     className={`calendar-cell ${isToday ? 'calendar-cell--today' : ''} ${
                       isSelected && !isToday ? 'calendar-cell--selected' : ''
                     } ${!day ? 'calendar-cell--empty' : ''}`}
-                    onClick={() => iso && setSelectedDate(iso)}
                     disabled={!day}
+                    onClick={() => iso && setSelectedDate(iso)}
                   >
-                    {day && <span>{day}</span>}
-                    {hasEvent && <span className="calendar-cell__dot" />}
+                    {day && (
+                      <>
+                        <span>{day}</span>
+                        {hasEvent && <span className="calendar-cell__dot" />}
+                      </>
+                    )}
                   </button>
                 );
               })}
@@ -337,18 +473,19 @@ export default function CalendarPage() {
               agendaItems.map((item) =>
                 item.kind === 'event' ? (
                   <button
-                    key={`event-${item.event.id}`}
+                    key={`event-${item.occurrence.virtualId}`}
                     className="calendar-event-row calendar-event-row--clickable"
-                    onClick={() => openEventDetails(item.event)}
+                    onClick={() => openEventDetails(item.occurrence)}
                   >
                     <div className="calendar-event-row__time">
-                      {item.event.allDay ? 'All day' : item.event.startTime ?? ''}
+                      {item.occurrence.event.allDay ? 'All day' : item.occurrence.event.startTime ?? ''}
                     </div>
                     <div className="calendar-event-row__line" />
                     <div className="calendar-event-row__body">
                       <p className="calendar-event-row__title">
-                        {item.event.title}
-                        {reminders.some((r) => r.eventId === item.event.id) && (
+                        {item.occurrence.event.title}
+                        {item.occurrence.isRecurring && <span className="calendar-event-row__recurring">↻</span>}
+                        {reminders.some((r) => r.eventId === item.occurrence.event.id) && (
                           <svg
                             className="calendar-event-row__reminder-icon"
                             width="12"
@@ -372,32 +509,33 @@ export default function CalendarPage() {
                           </svg>
                         )}
                       </p>
-                      {item.event.location && (
-                        <p className="calendar-event-row__meta">{item.event.location}</p>
+                      {item.occurrence.event.location && (
+                        <p className="calendar-event-row__meta">{item.occurrence.event.location}</p>
                       )}
                     </div>
-                    <Badge tone={item.event.eventType === 'meeting' ? 'success' : 'neutral'}>
-                      {item.event.eventType === 'meeting' ? 'Meeting' : 'Event'}
+                    <Badge tone={item.occurrence.event.eventType === 'meeting' ? 'success' : 'neutral'}>
+                      {item.occurrence.event.eventType === 'meeting' ? 'Meeting' : 'Event'}
                     </Badge>
                   </button>
                 ) : (
                   <button
-                    key={`task-${item.task.id}`}
+                    key={`task-${item.occurrence.virtualId}`}
                     className="calendar-event-row calendar-event-row--clickable"
-                    onClick={() => openTaskDetails(item.task)}
+                    onClick={() => openTaskDetails(item.occurrence)}
                   >
                     <div className="calendar-event-row__time">
-                      {item.task.scheduledDate === selectedDate &&
-                      item.task.scheduledStartTime &&
-                      item.task.scheduledEndTime
-                        ? `${item.task.scheduledStartTime}–${item.task.scheduledEndTime}`
-                        : item.task.dueTime ?? ''}
+                      {item.occurrence.task.scheduledDate === selectedDate &&
+                      item.occurrence.task.scheduledStartTime &&
+                      item.occurrence.task.scheduledEndTime
+                        ? `${item.occurrence.task.scheduledStartTime}–${item.occurrence.task.scheduledEndTime}`
+                        : item.occurrence.task.dueTime ?? ''}
                     </div>
                     <div className="calendar-event-row__line" />
                     <div className="calendar-event-row__body">
                       <p className="calendar-event-row__title">
-                        {item.task.title}
-                        {reminders.some((r) => r.taskId === item.task.id) && (
+                        {item.occurrence.task.title}
+                        {item.occurrence.isRecurring && <span className="calendar-event-row__recurring">↻</span>}
+                        {reminders.some((r) => r.taskId === item.occurrence.task.id) && (
                           <svg
                             className="calendar-event-row__reminder-icon"
                             width="12"
@@ -444,17 +582,11 @@ export default function CalendarPage() {
           editingEvent ? reminders.find((r) => r.eventId === editingEvent.id) ?? null : null
         }
         defaultDate={selectedDate}
+        hideRecurrence={eventSheetHidesRecurrence}
         onClose={closeEventSheet}
-        onSave={async (input) => {
-          if (editingEvent) {
-            await updateEvent(editingEvent.id, input);
-          } else {
-            await addEvent(input);
-          }
-          closeEventSheet();
-        }}
+        onSave={handleEventSheetSave}
         onDelete={
-          editingEvent
+          editingEvent && !eventOverrideContext
             ? async () => {
                 await deleteEvent(editingEvent.id);
                 closeEventSheet();
@@ -464,14 +596,36 @@ export default function CalendarPage() {
       />
 
       <EventDetailsSheet
-        open={Boolean(detailsEvent)}
-        event={detailsEvent}
-        reminder={detailsEvent ? reminders.find((r) => r.eventId === detailsEvent.id) ?? null : null}
+        open={Boolean(detailsEventOccurrence)}
+        event={detailsEventOccurrence?.event ?? null}
+        reminder={
+          detailsEventOccurrence
+            ? reminders.find((r) => r.eventId === detailsEventOccurrence.event.id) ?? null
+            : null
+        }
+        recurrenceLabel={
+          detailsEventOccurrence?.isRecurring
+            ? describeRecurrence(
+                {
+                  type: (events.find((e) => e.id === detailsEventOccurrence.seriesId) ?? detailsEventOccurrence.event)
+                    .recurrenceType,
+                  daysOfWeek: (events.find((e) => e.id === detailsEventOccurrence.seriesId) ?? detailsEventOccurrence.event)
+                    .recurrenceDaysOfWeek,
+                },
+                (events.find((e) => e.id === detailsEventOccurrence.seriesId) ?? detailsEventOccurrence.event).eventDate,
+              )
+            : null
+        }
+        isRecurringOccurrence={detailsEventOccurrence?.isRecurring}
         onClose={closeEventDetails}
-        onEdit={editEventFromDetails}
+        onEdit={editEventSeries}
+        onEditOccurrence={editEventOccurrence}
+        onEditSeries={editEventSeries}
+        onDeleteOccurrence={deleteEventOccurrenceChoice}
+        onDeleteSeries={deleteEventSeries}
         onDelete={async () => {
-          if (!detailsEvent) return;
-          await deleteEvent(detailsEvent.id);
+          if (!detailsEventOccurrence) return;
+          await deleteEvent(detailsEventOccurrence.seriesId);
           closeEventDetails();
         }}
       />
@@ -482,15 +636,11 @@ export default function CalendarPage() {
         existingReminder={
           editingTask ? reminders.find((r) => r.taskId === editingTask.id) ?? null : null
         }
+        hideRecurrence={taskSheetHidesRecurrence}
         onClose={closeTaskSheet}
-        onSave={async (input) => {
-          if (editingTask) {
-            await updateTask(editingTask.id, input);
-          }
-          closeTaskSheet();
-        }}
+        onSave={handleTaskSheetSave}
         onDelete={
-          editingTask
+          editingTask && !taskOverrideContext
             ? async () => {
                 await deleteTask(editingTask.id);
                 closeTaskSheet();
@@ -500,15 +650,38 @@ export default function CalendarPage() {
       />
 
       <TaskDetailsSheet
-        open={Boolean(detailsTask)}
-        task={detailsTask}
-        reminder={detailsTask ? reminders.find((r) => r.taskId === detailsTask.id) ?? null : null}
+        open={Boolean(detailsTaskOccurrence)}
+        task={detailsTaskOccurrence?.task ?? null}
+        reminder={
+          detailsTaskOccurrence
+            ? reminders.find((r) => r.taskId === detailsTaskOccurrence.task.id) ?? null
+            : null
+        }
+        recurrenceLabel={
+          detailsTaskOccurrence?.isRecurring
+            ? describeRecurrence(
+                {
+                  type: (tasks.find((tsk) => tsk.id === detailsTaskOccurrence.seriesId) ?? detailsTaskOccurrence.task)
+                    .recurrenceType,
+                  daysOfWeek: (tasks.find((tsk) => tsk.id === detailsTaskOccurrence.seriesId) ?? detailsTaskOccurrence.task)
+                    .recurrenceDaysOfWeek,
+                },
+                (tasks.find((tsk) => tsk.id === detailsTaskOccurrence.seriesId) ?? detailsTaskOccurrence.task).dueDate ??
+                  detailsTaskOccurrence.date,
+              )
+            : null
+        }
+        isRecurringOccurrence={detailsTaskOccurrence?.isRecurring}
         onClose={closeTaskDetails}
-        onEdit={editTaskFromDetails}
+        onEdit={editTaskSeries}
+        onEditOccurrence={editTaskOccurrence}
+        onEditSeries={editTaskSeries}
+        onDeleteOccurrence={deleteTaskOccurrenceChoice}
+        onDeleteSeries={deleteTaskSeries}
         onStartFocus={startFocusFromDetails}
         onDelete={async () => {
-          if (!detailsTask) return;
-          await deleteTask(detailsTask.id);
+          if (!detailsTaskOccurrence) return;
+          await deleteTask(detailsTaskOccurrence.seriesId);
           closeTaskDetails();
         }}
       />

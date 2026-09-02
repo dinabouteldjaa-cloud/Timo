@@ -4,6 +4,10 @@ import ReminderPicker, {
   emptyReminderValue,
   type ReminderPickerValue,
 } from '../../components/ui/ReminderPicker';
+import RecurrencePicker, {
+  emptyRecurrenceValue,
+  type RecurrencePickerValue,
+} from '../../components/ui/RecurrencePicker';
 import type { NewEventInput, ReminderSelection } from '../../state/AppStateContext';
 import { computeRemindAt, minutesForPreset, presetForOffset } from '../../lib/reminderPresets';
 import { localDateTimeToISOString, isoStringToLocalDateTime } from '../../lib/utils';
@@ -18,6 +22,8 @@ interface AddEventSheetProps {
   onClose: () => void;
   onSave: (input: NewEventInput) => void | Promise<void>;
   onDelete?: () => void | Promise<void>;
+  /** See AddTaskSheet's hideRecurrence — same meaning, for "Edit this occurrence" of a recurring event. */
+  hideRecurrence?: boolean;
 }
 
 const eventTypes: CalendarEventType[] = ['event', 'meeting'];
@@ -58,6 +64,15 @@ function reminderValueFromExisting(reminder?: Reminder | null): ReminderPickerVa
   };
 }
 
+function recurrenceValueFromEvent(event?: CalendarEvent | null): RecurrencePickerValue {
+  if (!event) return emptyRecurrenceValue();
+  return {
+    type: event.recurrenceType ?? 'none',
+    daysOfWeek: event.recurrenceDaysOfWeek ?? [],
+    endDate: event.recurrenceEndDate ?? '',
+  };
+}
+
 export default function AddEventSheet({
   open,
   event,
@@ -66,10 +81,14 @@ export default function AddEventSheet({
   onClose,
   onSave,
   onDelete,
+  hideRecurrence,
 }: AddEventSheetProps) {
   const [form, setForm] = useState(event ? formFromEvent(event) : emptyForm(defaultDate));
   const [reminderValue, setReminderValue] = useState<ReminderPickerValue>(
     reminderValueFromExisting(existingReminder),
+  );
+  const [recurrenceValue, setRecurrenceValue] = useState<RecurrencePickerValue>(
+    recurrenceValueFromEvent(event),
   );
   const [titleTouched, setTitleTouched] = useState(false);
   const [dateTouched, setDateTouched] = useState(false);
@@ -81,6 +100,7 @@ export default function AddEventSheet({
     if (open) {
       setForm(event ? formFromEvent(event) : emptyForm(defaultDate));
       setReminderValue(reminderValueFromExisting(existingReminder));
+      setRecurrenceValue(recurrenceValueFromEvent(event));
       setTitleTouched(false);
       setDateTouched(false);
       setReminderError(null);
@@ -141,6 +161,10 @@ export default function AddEventSheet({
         location: form.location || undefined,
         eventType: form.eventType,
         reminder,
+        recurrenceType: hideRecurrence ? 'none' : recurrenceValue.type,
+        recurrenceDaysOfWeek:
+          !hideRecurrence && recurrenceValue.type === 'custom' ? recurrenceValue.daysOfWeek : undefined,
+        recurrenceEndDate: !hideRecurrence && recurrenceValue.endDate ? recurrenceValue.endDate : undefined,
       });
     } finally {
       setSaving(false);
@@ -272,6 +296,8 @@ export default function AddEventSheet({
               onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
             />
           </label>
+
+          {!hideRecurrence && <RecurrencePicker value={recurrenceValue} onChange={setRecurrenceValue} />}
 
           <ReminderPicker
             value={reminderValue}

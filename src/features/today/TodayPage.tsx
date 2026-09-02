@@ -8,7 +8,9 @@ import TaskRow from '../../components/ui/TaskRow';
 import TimoMascot, { type TimoMascotVariant } from '../../components/ui/TimoMascot';
 import { useLocale, formatString } from '../../i18n/LocaleContext';
 import { getGreetingKey, formatFriendlyDate, toISODate } from '../../lib/utils';
-import { useAppState } from '../../state/AppStateContext';
+import { useAppState, type NewTaskInput } from '../../state/AppStateContext';
+import { expandTaskOccurrences } from '../../lib/occurrences';
+import { describeRecurrence } from '../../lib/recurrence';
 import AddTaskSheet from '../tasks/AddTaskSheet';
 import TaskDetailsSheet from '../tasks/TaskDetailsSheet';
 import NotificationOnboardingCard from './NotificationOnboardingCard';
@@ -27,38 +29,27 @@ const TODAY_MASCOT_MESSAGES: Record<TodayMascotVariant, string> = {
 };
 
 /**
- * Whether a task belongs to the user's current LOCAL day — the same
- * "is this scheduled for today" semantics TaskRow already uses
- * (scheduledDate compared via toISODate(new Date()), no UTC/timestamp
- * comparisons that could roll over at a timezone boundary).
- *
- * Priority, per the existing Plan My Day / scheduling model:
- *   1. scheduledDate, if set — an explicit Plan My Day placement always
- *      wins and decides membership outright (even if it's for another
- *      day, in which case this task is NOT part of today).
- *   2. otherwise dueDate, if set — the task's deadline.
- *   3. otherwise (no scheduledDate and no dueDate at all) — the task
- *      isn't tied to any particular day, so it isn't "future" or "past"
- *      either; it stays part of Today, matching the app's original
- *      behavior of always surfacing dateless tasks there.
- */
-function isTodayRelevantTask(task: Task, todayISO: string): boolean {
-  if (task.scheduledDate) return task.scheduledDate === todayISO;
-  if (task.dueDate) return task.dueDate === todayISO;
-  return true;
-}
-
-/**
- * Deterministic, local-only — no AI. Operates on todayRelevantTasks (see
- * isTodayRelevantTask), never the user's full task history, so a task due
- * yesterday or scheduled for next week can never change what Timo says
- * today.
+ * Deterministic, local-only — no AI. Operates on today's relevant task
+ * entries (see todayRelevantEntries below), never the user's full task
+ * history, so a task due yesterday or scheduled for next week can never
+ * change what Timo says today.
  */
 function getTodayMascotVariant(total: number, completed: number): TodayMascotVariant {
   if (total > 0 && completed === total) return 'celebrating';
   if (completed > 0) return 'happy';
   if (total - completed >= 3) return 'motivating';
   return 'greeting';
+}
+
+interface TodayEntry {
+  /** The row to display (an override or the series parent for a recurring occurrence; the task itself otherwise). */
+  task: Task;
+  /** The recurring parent's id, or the task's own id if not recurring. */
+  seriesId: string;
+  /** Set only for a genuine recurring occurrence — used for per-occurrence completion/edit/delete. */
+  occurrenceDate?: string;
+  isRecurring: boolean;
+  completed: boolean;
 }
 
 export default function TodayPage() {
@@ -71,6 +62,11 @@ export default function TodayPage() {
     addTask,
     updateTask,
     deleteTask,
+    deleteTaskOccurrence,
+    saveTaskOccurrenceOverride,
+    taskOccurrenceCompletions,
+    taskOccurrenceSkips,
+    setTaskOccurrenceCompletion,
     eventsLoading,
     upcomingEvent,
     reminders,
@@ -81,27 +77,76 @@ export default function TodayPage() {
 
   const [taskSheetOpen, setTaskSheetOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [detailsTask, setDetailsTask] = useState<Task | null>(null);
+  const [taskSheetHidesRecurrence, setTaskSheetHidesRecurrence] = useState(false);
+  const [taskOverrideContext, setTaskOverrideContext] = useState<{ seriesId: string; date: string } | null>(null);
+  const [detailsEntry, setDetailsEntry] = useState<TodayEntry | null>(null);
 
   const greeting = t.today[getGreetingKey()];
   const dateLabel = useMemo(() => formatFriendlyDate(locale), [locale]);
-
-  // Every Today-scoped number below (display list, counts, progress,
-  // mascot) is derived from this SAME set, so they can never disagree
-  // with each other, and none of them can be swayed by a task due
-  // yesterday or scheduled for some other day.
   const todayISO = toISODate(new Date());
-  const todayRelevantTasks = tasks.filter((task) => isTodayRelevantTask(task, todayISO));
 
-  const todaysTasks = todayRelevantTasks.filter((task) => task.status !== 'completed').slice(0, 4);
-  // Completed today-relevant tasks still count here even though the list
-  // above only ever displays incomplete ones — progress/mascot need the
-  // full today-relevant set, not just what's currently visible.
-  const completed = todayRelevantTasks.filter((task) => task.status === 'completed').length;
+  const todayOccurrences = useMemo(
+    () => expandTaskOccurrences(tasks, todayISO, todayISO, taskOccurrenceCompletions, taskOccurrenceSkips),
+    [tasks, todayISO, taskOccurrenceCompletions, taskOccurrenceSkips],
+  );
+
+  // Today's relevant tasks — a union of:
+  //   1. today's occurrences of recurring series (and non-recurring tasks
+  //      whose own dueDate is today), from the shared occurrence expansion;
+  //   2. dateless tasks — never tied to any day, so (as before this
+  //      feature existed) they always count as part of today;
+  //   3. tasks explicitly scheduled onto today via Plan My Day, even if
+  //      their own dueDate is a different day.
+  // Every Today-scoped number below (display list, counts, progress,
+  // mascot) is derived from this SAME list, so they can never disagree.
+  const todayRelevantEntries = useMemo<TodayEntry[]>(() => {
+    const entries: TodayEntry[] = [];
+    const seen = new Set<string>();
+
+    for (const occ of todayOccurrences) {
+      entries.push({
+        task: occ.task,
+        seriesId: occ.seriesId,
+        occurrenceDate: occ.date,
+        isRecurring: occ.isRecurring,
+        completed: occ.completed,
+      });
+      seen.add(occ.task.id);
+    }
+
+    for (const task of tasks) {
+      if (task.recurrenceParentId) continue; // only ever shown attached to its series' occurrence slot
+      if (seen.has(task.id)) continue;
+      const isDateless = !task.dueDate && task.recurrenceType === 'none';
+      const isScheduledToday = task.scheduledDate === todayISO;
+      if (isDateless || isScheduledToday) {
+        entries.push({
+          task,
+          seriesId: task.id,
+          isRecurring: false,
+          completed: task.status === 'completed',
+        });
+        seen.add(task.id);
+      }
+    }
+
+    return entries;
+  }, [todayOccurrences, tasks, todayISO]);
+
+  function entryAsTask(entry: TodayEntry): Task {
+    return {
+      ...entry.task,
+      dueDate: entry.occurrenceDate ?? entry.task.dueDate,
+      status: entry.completed ? 'completed' : 'todo',
+    };
+  }
+
+  const todaysTasks = todayRelevantEntries.filter((e) => !e.completed).slice(0, 4);
+  const completed = todayRelevantEntries.filter((e) => e.completed).length;
   const progressPct =
-    todayRelevantTasks.length === 0 ? 0 : (completed / todayRelevantTasks.length) * 100;
+    todayRelevantEntries.length === 0 ? 0 : (completed / todayRelevantEntries.length) * 100;
 
-  const mascotVariant = getTodayMascotVariant(todayRelevantTasks.length, completed);
+  const mascotVariant = getTodayMascotVariant(todayRelevantEntries.length, completed);
   const mascotMessage = TODAY_MASCOT_MESSAGES[mascotVariant];
 
   const taskIdsWithReminder = new Set(
@@ -120,34 +165,83 @@ export default function TodayPage() {
 
   function openQuickAdd() {
     setEditingTask(null);
+    setTaskSheetHidesRecurrence(false);
+    setTaskOverrideContext(null);
     setTaskSheetOpen(true);
   }
 
-  function openTaskDetails(task: Task) {
-    setDetailsTask(task);
+  function openTaskDetails(entry: TodayEntry) {
+    setDetailsEntry(entry);
   }
 
   function closeTaskDetails() {
-    setDetailsTask(null);
+    setDetailsEntry(null);
   }
 
+  /** Plain (non-recurring) edit path — unchanged from before this feature. */
   function editTaskFromDetails() {
-    if (!detailsTask) return;
-    setEditingTask(detailsTask);
-    setDetailsTask(null);
+    if (!detailsEntry) return;
+    const series = tasks.find((tsk) => tsk.id === detailsEntry.seriesId) ?? detailsEntry.task;
+    setEditingTask(series);
+    setTaskSheetHidesRecurrence(false);
+    setTaskOverrideContext(null);
+    setDetailsEntry(null);
     setTaskSheetOpen(true);
   }
 
+  function editTaskOccurrence() {
+    if (!detailsEntry || !detailsEntry.occurrenceDate) return;
+    setEditingTask({ ...detailsEntry.task, dueDate: detailsEntry.occurrenceDate });
+    setTaskSheetHidesRecurrence(true);
+    setTaskOverrideContext({ seriesId: detailsEntry.seriesId, date: detailsEntry.occurrenceDate });
+    setDetailsEntry(null);
+    setTaskSheetOpen(true);
+  }
+
+  async function deleteTaskSeries() {
+    if (!detailsEntry) return;
+    await deleteTask(detailsEntry.seriesId);
+    setDetailsEntry(null);
+  }
+
+  async function deleteTaskOccurrenceChoice() {
+    if (!detailsEntry || !detailsEntry.occurrenceDate) return;
+    const overrideId = detailsEntry.task.recurrenceParentId ? detailsEntry.task.id : undefined;
+    await deleteTaskOccurrence(detailsEntry.seriesId, detailsEntry.occurrenceDate, overrideId);
+    setDetailsEntry(null);
+  }
+
   function startFocusFromDetails() {
-    if (!detailsTask) return;
-    selectFocusTask(detailsTask.id);
-    setDetailsTask(null);
+    if (!detailsEntry) return;
+    selectFocusTask(detailsEntry.task.id);
+    setDetailsEntry(null);
     navigate('/focus');
   }
 
   function closeTaskSheet() {
     setTaskSheetOpen(false);
     setEditingTask(null);
+    setTaskSheetHidesRecurrence(false);
+    setTaskOverrideContext(null);
+  }
+
+  async function handleTaskSheetSave(input: NewTaskInput) {
+    if (taskOverrideContext) {
+      await saveTaskOccurrenceOverride(taskOverrideContext.seriesId, taskOverrideContext.date, input);
+    } else if (editingTask) {
+      await updateTask(editingTask.id, input);
+    } else {
+      await addTask(input);
+    }
+    closeTaskSheet();
+  }
+
+  function handleToggle(entry: TodayEntry) {
+    if (entry.occurrenceDate && entry.isRecurring) {
+      void setTaskOccurrenceCompletion(entry.seriesId, entry.occurrenceDate, !entry.completed);
+    } else {
+      toggleTask(entry.task.id);
+    }
   }
 
   return (
@@ -175,7 +269,7 @@ export default function TodayPage() {
         <Card padding="sm">
           <div className="today-summary__row">
             <span className="today-summary__label">
-              {formatString(t.today.tasksCompleted, { completed, total: todayRelevantTasks.length })}
+              {formatString(t.today.tasksCompleted, { completed, total: todayRelevantEntries.length })}
             </span>
             <span className="today-summary__pct">{Math.round(progressPct)}%</span>
           </div>
@@ -240,13 +334,13 @@ export default function TodayPage() {
             ) : todaysTasks.length === 0 ? (
               <p className="today-empty">{t.today.noTasksToday}</p>
             ) : (
-              todaysTasks.map((task) => (
+              todaysTasks.map((entry) => (
                 <TaskRow
-                  key={task.id}
-                  task={task}
-                  onToggle={toggleTask}
-                  onOpen={openTaskDetails}
-                  hasReminder={taskIdsWithReminder.has(task.id)}
+                  key={entry.occurrenceDate ? `${entry.seriesId}::${entry.occurrenceDate}` : entry.task.id}
+                  task={entryAsTask(entry)}
+                  onToggle={() => handleToggle(entry)}
+                  onOpen={() => openTaskDetails(entry)}
+                  hasReminder={taskIdsWithReminder.has(entry.task.id)}
                 />
               ))
             )}
@@ -266,17 +360,11 @@ export default function TodayPage() {
         existingReminder={
           editingTask ? reminders.find((r) => r.taskId === editingTask.id) ?? null : null
         }
+        hideRecurrence={taskSheetHidesRecurrence}
         onClose={closeTaskSheet}
-        onSave={async (input) => {
-          if (editingTask) {
-            await updateTask(editingTask.id, input);
-          } else {
-            await addTask(input);
-          }
-          closeTaskSheet();
-        }}
+        onSave={handleTaskSheetSave}
         onDelete={
-          editingTask
+          editingTask && !taskOverrideContext
             ? async () => {
                 await deleteTask(editingTask.id);
                 closeTaskSheet();
@@ -286,15 +374,34 @@ export default function TodayPage() {
       />
 
       <TaskDetailsSheet
-        open={Boolean(detailsTask)}
-        task={detailsTask}
-        reminder={detailsTask ? reminders.find((r) => r.taskId === detailsTask.id) ?? null : null}
+        open={Boolean(detailsEntry)}
+        task={detailsEntry ? entryAsTask(detailsEntry) : null}
+        reminder={detailsEntry ? reminders.find((r) => r.taskId === detailsEntry.task.id) ?? null : null}
+        recurrenceLabel={
+          detailsEntry?.isRecurring
+            ? describeRecurrence(
+                {
+                  type: (tasks.find((tsk) => tsk.id === detailsEntry.seriesId) ?? detailsEntry.task).recurrenceType,
+                  daysOfWeek: (tasks.find((tsk) => tsk.id === detailsEntry.seriesId) ?? detailsEntry.task)
+                    .recurrenceDaysOfWeek,
+                },
+                (tasks.find((tsk) => tsk.id === detailsEntry.seriesId) ?? detailsEntry.task).dueDate ??
+                  detailsEntry.occurrenceDate ??
+                  todayISO,
+              )
+            : null
+        }
+        isRecurringOccurrence={detailsEntry?.isRecurring}
         onClose={closeTaskDetails}
         onEdit={editTaskFromDetails}
+        onEditOccurrence={editTaskOccurrence}
+        onEditSeries={editTaskFromDetails}
+        onDeleteOccurrence={deleteTaskOccurrenceChoice}
+        onDeleteSeries={deleteTaskSeries}
         onStartFocus={startFocusFromDetails}
         onDelete={async () => {
-          if (!detailsTask) return;
-          await deleteTask(detailsTask.id);
+          if (!detailsEntry) return;
+          await deleteTask(detailsEntry.seriesId);
           closeTaskDetails();
         }}
       />

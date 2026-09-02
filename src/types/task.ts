@@ -30,9 +30,21 @@ export interface Task {
   scheduledDate?: string; // "YYYY-MM-DD"
   scheduledStartTime?: string; // "HH:MM"
   scheduledEndTime?: string; // "HH:MM"
+  // Recurrence (see supabase/migrations/0011_recurring_tasks_events.sql).
+  // 'none' (the default) means an ordinary, non-recurring task — every
+  // task created before this feature existed behaves exactly as before.
+  recurrenceType: RecurrenceType;
+  recurrenceDaysOfWeek?: number[]; // 0=Sun..6=Sat, only used for 'custom'
+  recurrenceEndDate?: string; // inclusive last date the series applies to
+  // Set only on a real task that overrides ONE occurrence of a series —
+  // see src/lib/occurrences.ts for how this is used.
+  recurrenceParentId?: string;
+  recurrenceOccurrenceDate?: string;
 }
 
 export type CalendarEventType = 'event' | 'meeting';
+
+export type RecurrenceType = 'none' | 'daily' | 'weekly' | 'monthly' | 'custom';
 
 export interface CalendarEvent {
   id: string;
@@ -44,6 +56,12 @@ export interface CalendarEvent {
   allDay: boolean;
   location?: string;
   eventType: CalendarEventType;
+  // Recurrence — see the Task interface above for the same fields' meaning.
+  recurrenceType: RecurrenceType;
+  recurrenceDaysOfWeek?: number[];
+  recurrenceEndDate?: string;
+  recurrenceParentId?: string;
+  recurrenceOccurrenceDate?: string;
 }
 
 /**

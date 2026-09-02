@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from '../../components/layout/Header';
 import Card from '../../components/ui/Card';
@@ -9,6 +9,7 @@ import TimoAvatar from '../../components/avatar/TimoAvatar';
 import { useAppState } from '../../state/AppStateContext';
 import { planMyDay } from '../../lib/planMyDayApi';
 import { toISODate } from '../../lib/utils';
+import { isDateAnOccurrence } from '../../lib/occurrences';
 import type { PlannedTaskBlock, UnscheduledTask } from '../../types/planMyDay';
 import './PlanMyDayPage.css';
 
@@ -32,24 +33,60 @@ interface EditableBlock extends PlannedTaskBlock {
 
 export default function PlanMyDayPage() {
   const navigate = useNavigate();
-  const { tasks, events, setTaskSchedule } = useAppState();
+  const {
+    tasks,
+    events,
+    tasksLoading,
+    eventsLoading,
+    setTaskSchedule,
+    taskOccurrenceCompletions,
+    taskOccurrenceSkips,
+  } = useAppState();
 
   const [step, setStep] = useState<Step>('loading');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [blocks, setBlocks] = useState<EditableBlock[]>([]);
   const [unscheduled, setUnscheduled] = useState<UnscheduledTask[]>([]);
   const [resultMessage, setResultMessage] = useState<string | null>(null);
+  const hasStartedRef = useRef(false);
 
+  // Same eligibility as Today's "Today's Tasks" section: any incomplete
+  // task, with NO due-date restriction — Today itself doesn't filter by
+  // due date (see TodayPage.tsx's `todaysTasks`), so a task with no due
+  // date, or one due on a different day, is still shown there and must
+  // stay eligible for planning here too. (Today additionally caps its
+  // list to 4 items for display — that's a compact-card display limit,
+  // not part of the "is this eligible today" definition, so it's not
+  // applied here.)
+  //
   // Tasks already scheduled for today are still included here on purpose:
   // Plan My Day may propose a new placement for them, but nothing changes
   // until Accept — accepting simply overwrites today's old block for that
   // task with the newly accepted one (setTaskSchedule is a plain update).
+  //
+  // Recurring series parents are a special case (added alongside
+  // recurring tasks/events — see 0011_recurring_tasks_events.sql): a
+  // series parent's own `status` never reflects per-occurrence
+  // completion (that lives in a separate table), so without this check a
+  // "Gym every Monday" task would appear as a planning candidate every
+  // single day, not just Mondays. A series parent is only included when
+  // today is genuinely one of its occurrences, and not already
+  // completed/removed for today specifically. Occurrence OVERRIDE rows
+  // (recurrenceParentId set) are unaffected — they're already concrete,
+  // dated, ordinary tasks and flow through exactly as before.
   const todaysTasks = useMemo(
     () =>
-      tasks.filter(
-        (task) => task.status !== 'completed' && (!task.dueDate || task.dueDate === TODAY_ISO),
-      ),
-    [tasks],
+      tasks.filter((task) => {
+        if (task.status === 'completed') return false;
+        if (task.recurrenceParentId) return true;
+        if (task.recurrenceType !== 'none') {
+          if (!isDateAnOccurrence(task, TODAY_ISO)) return false;
+          const key = `${task.id}::${TODAY_ISO}`;
+          if (taskOccurrenceCompletions.has(key) || taskOccurrenceSkips.has(key)) return false;
+        }
+        return true;
+      }),
+    [tasks, taskOccurrenceCompletions, taskOccurrenceSkips],
   );
   const todaysEvents = useMemo(() => events.filter((event) => event.eventDate === TODAY_ISO), [events]);
 
@@ -80,10 +117,18 @@ export default function PlanMyDayPage() {
   }
 
   useEffect(() => {
+    // Wait for AppStateContext to finish loading both tasks and events
+    // before deciding whether there's anything to plan — otherwise a
+    // page landed on before that fetch resolves could see the initial
+    // empty arrays and permanently show "Nothing to plan yet" even
+    // though data arrives moments later. Only auto-run once; after that,
+    // "Try again" is the explicit re-run action.
+    if (tasksLoading || eventsLoading) return;
+    if (hasStartedRef.current) return;
+    hasStartedRef.current = true;
     runPlan();
-    // Only run once on mount — re-planning is an explicit "Try again" action.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [tasksLoading, eventsLoading]);
 
   function taskFor(taskId: string) {
     return tasks.find((t) => t.id === taskId);

@@ -12,6 +12,7 @@ import type {
   CalendarEvent,
   CalendarEventType,
   FocusSessionRecord,
+  RecurrenceType,
   Reminder,
   Task,
   TaskCategory,
@@ -54,6 +55,10 @@ export interface NewTaskInput {
   estimatedMinutes?: number;
   /** null = no reminder / clear the existing one. */
   reminder: ReminderSelection | null;
+  /** Omitted/undefined means 'none' — an ordinary, non-recurring task. */
+  recurrenceType?: RecurrenceType;
+  recurrenceDaysOfWeek?: number[];
+  recurrenceEndDate?: string;
 }
 
 export interface NewEventInput {
@@ -67,6 +72,9 @@ export interface NewEventInput {
   eventType: CalendarEventType;
   /** null = no reminder / clear the existing one. */
   reminder: ReminderSelection | null;
+  recurrenceType?: RecurrenceType;
+  recurrenceDaysOfWeek?: number[];
+  recurrenceEndDate?: string;
 }
 
 type FocusStatus = 'idle' | 'running' | 'paused' | 'completed';
@@ -99,6 +107,22 @@ interface AppStateValue {
     id: string,
     schedule: { date: string; startTime: string; endTime: string } | null,
   ) => Promise<void>;
+
+  // Recurrence — see supabase/migrations/0011_recurring_tasks_events.sql
+  // and src/lib/occurrences.ts. Sparse `${id}::${date}` key sets; only
+  // completed/skipped occurrences ever appear here.
+  taskOccurrenceCompletions: Set<string>;
+  taskOccurrenceSkips: Set<string>;
+  eventOccurrenceSkips: Set<string>;
+  setTaskOccurrenceCompletion: (taskId: string, occurrenceDate: string, completed: boolean) => Promise<void>;
+  deleteTaskOccurrence: (seriesId: string, occurrenceDate: string, overrideTaskId?: string) => Promise<void>;
+  saveTaskOccurrenceOverride: (seriesId: string, occurrenceDate: string, input: NewTaskInput) => Promise<Task>;
+  deleteEventOccurrence: (seriesId: string, occurrenceDate: string, overrideEventId?: string) => Promise<void>;
+  saveEventOccurrenceOverride: (
+    seriesId: string,
+    occurrenceDate: string,
+    input: NewEventInput,
+  ) => Promise<CalendarEvent>;
 
   events: CalendarEvent[];
   eventsLoading: boolean;
@@ -261,21 +285,34 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [tasksError, setTasksError] = useState<string | null>(null);
+  // Recurrence support (see supabase/migrations/0011_recurring_tasks_events.sql):
+  // sparse sets of `${taskId}::${date}` keys — only completed/skipped
+  // occurrences ever get an entry, never one row per calendar date.
+  const [taskOccurrenceCompletions, setTaskOccurrenceCompletions] = useState<Set<string>>(new Set());
+  const [taskOccurrenceSkips, setTaskOccurrenceSkips] = useState<Set<string>>(new Set());
 
   // Load tasks whenever the signed-in user changes (login/logout/switch).
   useEffect(() => {
     if (!userId) {
       setTasks([]);
       setTasksError(null);
+      setTaskOccurrenceCompletions(new Set());
+      setTaskOccurrenceSkips(new Set());
       return;
     }
     let cancelled = false;
     setTasksLoading(true);
     setTasksError(null);
-    tasksApi
-      .fetchTasks(userId)
-      .then((loaded) => {
-        if (!cancelled) setTasks(loaded);
+    Promise.all([
+      tasksApi.fetchTasks(userId),
+      tasksApi.fetchTaskOccurrenceCompletions(userId),
+      tasksApi.fetchTaskOccurrenceSkips(userId),
+    ])
+      .then(([loadedTasks, completions, skips]) => {
+        if (cancelled) return;
+        setTasks(loadedTasks);
+        setTaskOccurrenceCompletions(completions);
+        setTaskOccurrenceSkips(skips);
       })
       .catch((err: Error) => {
         // eslint-disable-next-line no-console
@@ -389,24 +426,107 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // --- Recurrence: per-occurrence task actions ---------------------------
+  // See supabase/migrations/0011_recurring_tasks_events.sql and
+  // src/lib/occurrences.ts for the full architecture. None of these ever
+  // touch the series' own row — they only add/remove sparse
+  // completion/skip records, or (for "edit this occurrence") create an
+  // entirely ordinary task that happens to reference which series/date it
+  // stands in for.
+
+  const setTaskOccurrenceCompletion = useCallback(
+    async (taskId: string, occurrenceDate: string, completed: boolean) => {
+      if (!userId) return;
+      const key = `${taskId}::${occurrenceDate}`;
+      const previous = taskOccurrenceCompletions;
+      setTaskOccurrenceCompletions((prev) => {
+        const next = new Set(prev);
+        if (completed) next.add(key);
+        else next.delete(key);
+        return next;
+      });
+      try {
+        if (completed) {
+          await tasksApi.completeTaskOccurrence(userId, taskId, occurrenceDate);
+        } else {
+          await tasksApi.uncompleteTaskOccurrence(taskId, occurrenceDate);
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] setTaskOccurrenceCompletion failed', err);
+        setTaskOccurrenceCompletions(previous);
+        setTasksError(err instanceof Error ? err.message : 'Could not update this occurrence.');
+      }
+    },
+    [userId, taskOccurrenceCompletions],
+  );
+
+  /**
+   * Deletes one occurrence of a recurring task. If that occurrence was
+   * already overridden by its own real task row (overrideTaskId), that
+   * row is deleted too — otherwise the computed occurrence would simply
+   * reappear on that date. The series itself (seriesId) is never touched.
+   */
+  const deleteTaskOccurrence = useCallback(
+    async (seriesId: string, occurrenceDate: string, overrideTaskId?: string) => {
+      if (!userId) return;
+      try {
+        if (overrideTaskId) {
+          await tasksApi.deleteTask(overrideTaskId);
+          setTasks((prev) => prev.filter((task) => task.id !== overrideTaskId));
+        }
+        await tasksApi.skipTaskOccurrence(userId, seriesId, occurrenceDate);
+        setTaskOccurrenceSkips((prev) => new Set(prev).add(`${seriesId}::${occurrenceDate}`));
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] deleteTaskOccurrence failed', err);
+        setTasksError(err instanceof Error ? err.message : 'Could not remove this occurrence.');
+        throw err;
+      }
+    },
+    [userId],
+  );
+
+  /** "Edit this occurrence" — creates a real, ordinary task standing in for one date of a series. */
+  const saveTaskOccurrenceOverride = useCallback(
+    async (seriesId: string, occurrenceDate: string, input: NewTaskInput) => {
+      if (!userId) throw new Error('Not signed in.');
+      try {
+        const created = await tasksApi.createTaskOccurrenceOverride(userId, seriesId, occurrenceDate, input);
+        setTasks((prev) => [created, ...prev]);
+        await applyTaskReminder(created.id, input.reminder);
+        return created;
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] saveTaskOccurrenceOverride failed', err);
+        setTasksError(err instanceof Error ? err.message : 'Could not update this occurrence.');
+        throw err;
+      }
+    },
+    [userId, applyTaskReminder],
+  );
+
   // --- Calendar events ----------------------------------------------------
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(false);
   const [eventsError, setEventsError] = useState<string | null>(null);
+  const [eventOccurrenceSkips, setEventOccurrenceSkips] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!userId) {
       setEvents([]);
       setEventsError(null);
+      setEventOccurrenceSkips(new Set());
       return;
     }
     let cancelled = false;
     setEventsLoading(true);
     setEventsError(null);
-    eventsApi
-      .fetchEvents(userId)
-      .then((loaded) => {
-        if (!cancelled) setEvents(loaded);
+    Promise.all([eventsApi.fetchEvents(userId), eventsApi.fetchEventOccurrenceSkips(userId)])
+      .then(([loadedEvents, skips]) => {
+        if (cancelled) return;
+        setEvents(loadedEvents);
+        setEventOccurrenceSkips(skips);
       })
       .catch((err: Error) => {
         // eslint-disable-next-line no-console
@@ -455,6 +575,46 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       }
     },
     [applyEventReminder],
+  );
+
+  /** Deletes one occurrence of a recurring event. See deleteTaskOccurrence for the same pattern. */
+  const deleteEventOccurrence = useCallback(
+    async (seriesId: string, occurrenceDate: string, overrideEventId?: string) => {
+      if (!userId) return;
+      try {
+        if (overrideEventId) {
+          await eventsApi.deleteEvent(overrideEventId);
+          setEvents((prev) => prev.filter((event) => event.id !== overrideEventId));
+        }
+        await eventsApi.skipEventOccurrence(userId, seriesId, occurrenceDate);
+        setEventOccurrenceSkips((prev) => new Set(prev).add(`${seriesId}::${occurrenceDate}`));
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] deleteEventOccurrence failed', err);
+        setEventsError(err instanceof Error ? err.message : 'Could not remove this occurrence.');
+        throw err;
+      }
+    },
+    [userId],
+  );
+
+  /** "Edit this occurrence" for events — see saveTaskOccurrenceOverride. */
+  const saveEventOccurrenceOverride = useCallback(
+    async (seriesId: string, occurrenceDate: string, input: NewEventInput) => {
+      if (!userId) throw new Error('Not signed in.');
+      try {
+        const created = await eventsApi.createEventOccurrenceOverride(userId, seriesId, occurrenceDate, input);
+        setEvents((prev) => [...prev, created]);
+        await applyEventReminder(created.id, input.reminder);
+        return created;
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] saveEventOccurrenceOverride failed', err);
+        setEventsError(err instanceof Error ? err.message : 'Could not update this occurrence.');
+        throw err;
+      }
+    },
+    [userId, applyEventReminder],
   );
 
   const deleteEvent = useCallback(
@@ -722,6 +882,14 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       toggleTask,
       deleteTask,
       setTaskSchedule,
+      taskOccurrenceCompletions,
+      taskOccurrenceSkips,
+      eventOccurrenceSkips,
+      setTaskOccurrenceCompletion,
+      deleteTaskOccurrence,
+      saveTaskOccurrenceOverride,
+      deleteEventOccurrence,
+      saveEventOccurrenceOverride,
       events,
       eventsLoading,
       eventsError,
@@ -755,6 +923,14 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       toggleTask,
       deleteTask,
       setTaskSchedule,
+      taskOccurrenceCompletions,
+      taskOccurrenceSkips,
+      eventOccurrenceSkips,
+      setTaskOccurrenceCompletion,
+      deleteTaskOccurrence,
+      saveTaskOccurrenceOverride,
+      deleteEventOccurrence,
+      saveEventOccurrenceOverride,
       events,
       eventsLoading,
       eventsError,

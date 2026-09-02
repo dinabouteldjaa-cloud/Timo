@@ -1,12 +1,13 @@
 import { supabase } from './supabaseClient';
 import { toSupabaseError } from './supabaseErrors';
-import type { CalendarEvent, CalendarEventType } from '../types/task';
+import type { CalendarEvent, CalendarEventType, RecurrenceType } from '../types/task';
 
 // ---------------------------------------------------------------------------
 // Supabase `calendar_events` row shape (snake_case, matches
-// supabase/migrations/0002_calendar_events.sql) and mapping to/from the
-// app's `CalendarEvent` type so the rest of the app never has to deal with
-// the DB's column naming.
+// supabase/migrations/0002_calendar_events.sql plus recurrence columns from
+// 0011_recurring_tasks_events.sql) and mapping to/from the app's
+// `CalendarEvent` type so the rest of the app never has to deal with the
+// DB's column naming.
 // ---------------------------------------------------------------------------
 
 interface CalendarEventRow {
@@ -20,6 +21,11 @@ interface CalendarEventRow {
   all_day: boolean;
   location: string | null;
   event_type: CalendarEventType;
+  recurrence_type: RecurrenceType;
+  recurrence_days_of_week: number[] | null;
+  recurrence_end_date: string | null;
+  recurrence_parent_id: string | null;
+  recurrence_occurrence_date: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -36,6 +42,11 @@ function rowToEvent(row: CalendarEventRow): CalendarEvent {
     allDay: row.all_day,
     location: row.location ?? undefined,
     eventType: row.event_type,
+    recurrenceType: row.recurrence_type ?? 'none',
+    recurrenceDaysOfWeek: row.recurrence_days_of_week ?? undefined,
+    recurrenceEndDate: row.recurrence_end_date ?? undefined,
+    recurrenceParentId: row.recurrence_parent_id ?? undefined,
+    recurrenceOccurrenceDate: row.recurrence_occurrence_date ?? undefined,
   };
 }
 
@@ -48,6 +59,9 @@ export interface EventInput {
   allDay: boolean;
   location?: string;
   eventType: CalendarEventType;
+  recurrenceType?: RecurrenceType;
+  recurrenceDaysOfWeek?: number[];
+  recurrenceEndDate?: string;
 }
 
 export async function fetchEvents(userId: string): Promise<CalendarEvent[]> {
@@ -74,6 +88,9 @@ export async function createEvent(userId: string, input: EventInput): Promise<Ca
       all_day: input.allDay,
       location: input.location?.trim() || null,
       event_type: input.eventType,
+      recurrence_type: input.recurrenceType ?? 'none',
+      recurrence_days_of_week: input.recurrenceDaysOfWeek ?? null,
+      recurrence_end_date: input.recurrenceEndDate || null,
     })
     .select('*')
     .single();
@@ -94,6 +111,9 @@ export async function updateEvent(eventId: string, input: EventInput): Promise<C
       all_day: input.allDay,
       location: input.location?.trim() || null,
       event_type: input.eventType,
+      recurrence_type: input.recurrenceType ?? 'none',
+      recurrence_days_of_week: input.recurrenceDaysOfWeek ?? null,
+      recurrence_end_date: input.recurrenceEndDate || null,
     })
     .eq('id', eventId)
     .select('*')
@@ -106,4 +126,65 @@ export async function updateEvent(eventId: string, input: EventInput): Promise<C
 export async function deleteEvent(eventId: string): Promise<void> {
   const { error } = await supabase.from('calendar_events').delete().eq('id', eventId);
   if (error) throw toSupabaseError('Could not delete event', error);
+}
+
+// ---------------------------------------------------------------------------
+// Recurrence support (see supabase/migrations/0011_recurring_tasks_events.sql)
+// ---------------------------------------------------------------------------
+
+/** Creates a real, ordinary event row that overrides ONE occurrence of a recurring series. */
+export async function createEventOccurrenceOverride(
+  userId: string,
+  seriesId: string,
+  occurrenceDate: string,
+  input: EventInput,
+): Promise<CalendarEvent> {
+  const { data, error } = await supabase
+    .from('calendar_events')
+    .insert({
+      user_id: userId,
+      title: input.title.trim(),
+      description: input.description?.trim() || null,
+      event_date: input.eventDate,
+      start_time: input.allDay ? null : input.startTime || null,
+      end_time: input.allDay ? null : input.endTime || null,
+      all_day: input.allDay,
+      location: input.location?.trim() || null,
+      event_type: input.eventType,
+      recurrence_type: 'none',
+      recurrence_parent_id: seriesId,
+      recurrence_occurrence_date: occurrenceDate,
+    })
+    .select('*')
+    .single();
+
+  if (error) throw toSupabaseError('Could not update this occurrence', error);
+  return rowToEvent(data as CalendarEventRow);
+}
+
+/** Records "This occurrence" deleted, without touching the series or other occurrences. */
+export async function skipEventOccurrence(
+  userId: string,
+  eventId: string,
+  occurrenceDate: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('occurrence_skips')
+    .upsert(
+      { user_id: userId, event_id: eventId, occurrence_date: occurrenceDate },
+      { onConflict: 'event_id,occurrence_date' },
+    );
+  if (error) throw toSupabaseError('Could not remove this occurrence', error);
+}
+
+/** All skipped event occurrences, as `${eventId}::${date}` keys. */
+export async function fetchEventOccurrenceSkips(userId: string): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from('occurrence_skips')
+    .select('event_id, occurrence_date')
+    .eq('user_id', userId)
+    .not('event_id', 'is', null);
+
+  if (error) throw toSupabaseError('Could not load skipped occurrences', error);
+  return new Set((data as { event_id: string; occurrence_date: string }[]).map((r) => `${r.event_id}::${r.occurrence_date}`));
 }
