@@ -39,6 +39,7 @@ const fr: Strings = {
     filterOverdue: 'En retard',
     filterUpcoming: 'À venir',
     filterCompleted: 'Terminées',
+    tomorrow: 'Demain',
     addTask: 'Ajouter une tâche',
     emptyTitle: 'Aucune tâche ici',
     emptySubtitle: 'Les tâches que vous ajoutez apparaîtront dans cette liste.',
