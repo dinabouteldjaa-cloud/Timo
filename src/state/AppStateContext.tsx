@@ -367,6 +367,54 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     async (id: string) => {
       const current = tasks.find((task) => task.id === id);
       if (!current) return;
+
+      // A still-recurring series parent has no meaningful "complete the
+      // whole series" action — completion is always per-occurrence (see
+      // task_occurrence_completions / src/lib/occurrences.ts). Any
+      // caller that reaches toggleTask with a recurring series parent's
+      // id (e.g. the Tasks page's "All" tab, which shows the series
+      // parent as its own defining row with no specific date context)
+      // is redirected here to TODAY's occurrence specifically —
+      // mirroring how Today/Plan My Day already treat "today" as the
+      // relevant occurrence for a series when no more specific date is
+      // given. This function must NEVER write status onto a recurring
+      // parent's own row; occurrence rows that already know their exact
+      // date (Today/Tasks' Today&Upcoming filters/Calendar) call
+      // setTaskOccurrenceCompletion directly with that date instead of
+      // going through toggleTask at all.
+      if (current.recurrenceType !== 'none') {
+        if (!userId) return;
+        const todayISO = toISODate(new Date());
+        const key = `${id}::${todayISO}`;
+        const wasCompleted = taskOccurrenceCompletions.has(key);
+        const nextCompleted = !wasCompleted;
+
+        setTaskOccurrenceCompletions((prev) => {
+          const next = new Set(prev);
+          if (nextCompleted) next.add(key);
+          else next.delete(key);
+          return next;
+        });
+
+        try {
+          if (nextCompleted) {
+            await tasksApi.completeTaskOccurrence(userId, id, todayISO);
+          } else {
+            await tasksApi.uncompleteTaskOccurrence(id, todayISO);
+          }
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error('[AppState] toggleTask (recurring occurrence) failed', err);
+          setTaskOccurrenceCompletions((prev) => {
+            const next = new Set(prev);
+            if (wasCompleted) next.add(key);
+            else next.delete(key);
+            return next;
+          });
+        }
+        return;
+      }
+
       const nextStatus = current.status === 'completed' ? 'todo' : 'completed';
 
       // Optimistic update so checkboxes feel instant.
@@ -387,7 +435,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         setTasksError(err instanceof Error ? err.message : 'Could not update task.');
       }
     },
-    [tasks],
+    [tasks, userId, taskOccurrenceCompletions],
   );
 
   const deleteTask = useCallback(
