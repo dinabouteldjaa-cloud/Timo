@@ -541,7 +541,20 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       if (!userId) throw new Error('Not signed in.');
       try {
         const created = await tasksApi.createTaskOccurrenceOverride(userId, seriesId, occurrenceDate, input);
-        setTasks((prev) => [created, ...prev]);
+        // createTaskOccurrenceOverride can return either a genuinely new
+        // row (first edit of this occurrence) or an UPDATE of an
+        // already-existing override (editing the same occurrence again)
+        // — in the second case `created.id` already exists somewhere in
+        // `prev`. Blindly prepending would leave that stale copy in the
+        // array alongside the fresh one, and since occurrence resolution
+        // (see expandTaskOccurrences) keys a lookup Map by
+        // recurrence_parent_id + occurrence_date via a plain iteration
+        // order, whichever duplicate is processed last can silently win
+        // — occasionally surfacing the stale, pre-edit values. Filtering
+        // out any existing entry with the same id before prepending
+        // guarantees exactly one entry per id, matching the same
+        // in-place-replace guarantee updateTask already provides.
+        setTasks((prev) => [created, ...prev.filter((task) => task.id !== created.id)]);
         await applyTaskReminder(created.id, input.reminder);
         return created;
       } catch (err) {
@@ -652,7 +665,15 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       if (!userId) throw new Error('Not signed in.');
       try {
         const created = await eventsApi.createEventOccurrenceOverride(userId, seriesId, occurrenceDate, input);
-        setEvents((prev) => [...prev, created]);
+        // createEventOccurrenceOverride can return either a genuinely
+        // new row (first edit of this occurrence) or an UPDATE of an
+        // already-existing override (editing the same occurrence again)
+        // — in the second case `created.id` already exists somewhere in
+        // `prev`. Filtering out any existing entry with the same id
+        // before adding the fresh one guarantees exactly one entry per
+        // id — the same fix already applied to saveTaskOccurrenceOverride
+        // for the identical class of bug.
+        setEvents((prev) => [...prev.filter((event) => event.id !== created.id), created]);
         await applyEventReminder(created.id, input.reminder);
         return created;
       } catch (err) {
