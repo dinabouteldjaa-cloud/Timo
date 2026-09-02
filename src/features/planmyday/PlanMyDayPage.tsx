@@ -10,6 +10,7 @@ import { useAppState, type NewTaskInput } from '../../state/AppStateContext';
 import { planMyDay } from '../../lib/planMyDayApi';
 import { toISODate } from '../../lib/utils';
 import { isDateAnOccurrence, expandEventOccurrences } from '../../lib/occurrences';
+import { computeRemindAt } from '../../lib/reminderPresets';
 import type { PlannedTaskBlock, UnscheduledTask } from '../../types/planMyDay';
 import './PlanMyDayPage.css';
 
@@ -43,6 +44,7 @@ export default function PlanMyDayPage() {
     taskOccurrenceCompletions,
     taskOccurrenceSkips,
     eventOccurrenceSkips,
+    reminders,
   } = useAppState();
 
   const [step, setStep] = useState<Step>('loading');
@@ -172,11 +174,32 @@ export default function PlanMyDayPage() {
     }
 
     const existingOverride = findExistingOverride(taskId, TODAY_ISO);
+    // An existing override already has whatever reminder the user set
+    // (or explicitly cleared) while editing "this occurrence" — never
+    // touch it here.
     if (existingOverride) return existingOverride.id;
 
-    // No override exists yet for today — create one carrying the series'
-    // own current fields, WITHOUT copying its reminder (this only exists
-    // to hold today's schedule; it doesn't invent new reminder behavior).
+    // No override exists yet for today. push-reminders suppresses the
+    // series' own reminder for any occurrence that has an override (to
+    // avoid a duplicate notification once the override has its own
+    // reminder) — so creating one here with no reminder at all would
+    // silently delete today's notification for a series that DOES have
+    // one. Preserve it: reuse the series' existing reminder's offset and
+    // recompute remindAt for TODAY's actual occurrence date/time, using
+    // the same client-side computation (computeRemindAt) already used
+    // everywhere else a reminder is derived from a task's own date/time.
+    // Only a relative (offset-based) reminder can be carried forward
+    // this way — an absolute/custom reminder was for one specific past
+    // moment and has no "same offset" to reapply, so it's intentionally
+    // not copied. If the series has no reminder, or has no due_time to
+    // compute against, this correctly stays null — no new reminder is
+    // invented in either case.
+    const seriesReminder = reminders.find((r) => r.taskId === taskId);
+    const reminder =
+      seriesReminder?.offsetMinutes !== undefined && task.dueTime
+        ? { remindAt: computeRemindAt(TODAY_ISO, task.dueTime, seriesReminder.offsetMinutes), offsetMinutes: seriesReminder.offsetMinutes }
+        : null;
+
     const created = await saveTaskOccurrenceOverride(taskId, TODAY_ISO, {
       title: task.title,
       description: task.description,
@@ -185,7 +208,7 @@ export default function PlanMyDayPage() {
       priority: task.priority,
       category: task.category,
       estimatedMinutes: task.estimatedMinutes,
-      reminder: null,
+      reminder,
     } satisfies NewTaskInput);
     return created.id;
   }
