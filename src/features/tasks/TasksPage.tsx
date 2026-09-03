@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import Header from '../../components/layout/Header';
 import Card from '../../components/ui/Card';
-import Button from '../../components/ui/Button';
 import TaskRow from '../../components/ui/TaskRow';
 import EmptyState from '../../components/ui/EmptyState';
 import IconButton from '../../components/ui/IconButton';
 import { useLocale } from '../../i18n/LocaleContext';
 import { useAppState } from '../../state/AppStateContext';
 import { expandTaskOccurrences } from '../../lib/occurrences';
+import { describeRecurrence } from '../../lib/recurrence';
 import { toISODate, addDays, formatUpcomingDateLabel } from '../../lib/utils';
 import type { Task } from '../../types/task';
 import AddTaskSheet from './AddTaskSheet';
+import TaskDetailsSheet from './TaskDetailsSheet';
 import './TasksPage.css';
 
 type Filter = 'all' | 'today' | 'overdue' | 'upcoming' | 'completed';
@@ -72,6 +73,7 @@ export default function TasksPage() {
     addTask,
     updateTask,
     deleteTask,
+    deleteTaskOccurrence,
     saveTaskOccurrenceOverride,
     reminders,
     taskOccurrenceCompletions,
@@ -84,7 +86,14 @@ export default function TasksPage() {
   const [sheetHidesRecurrence, setSheetHidesRecurrence] = useState(false);
   const [overrideContext, setOverrideContext] = useState<{ seriesId: string; date: string } | null>(null);
   type FilteredRow = { row: Task; editTask: Task; occurrenceDate?: string; seriesId?: string };
-  const [choiceRow, setChoiceRow] = useState<FilteredRow | null>(null);
+  // Tapping a row now opens read-only details — editing only happens
+  // after an explicit Edit action (the sheet's own Edit button, or a
+  // swipe-left Edit). detailsInitialAction lets a swipe jump straight to
+  // the sheet's existing Edit/Delete flow without a second tap, while
+  // still going through that exact same logic (see TaskDetailsSheet's
+  // initialAction prop).
+  const [detailsRow, setDetailsRow] = useState<FilteredRow | null>(null);
+  const [detailsInitialAction, setDetailsInitialAction] = useState<'edit' | 'delete' | null>(null);
 
   // Drives "now" for overdue/date calculations below. Ticks once a
   // minute — never higher-frequency — which is exactly enough
@@ -325,45 +334,48 @@ export default function TasksPage() {
     setOverrideContext(null);
   }
 
-  /**
-   * Fix (review, item 9): a recurring occurrence must never be edited by
-   * silently opening the series parent directly — the user must
-   * explicitly choose "This occurrence" or "Entire series" first. An
-   * override row (recurrenceType === 'none' on the edited row itself) or
-   * an ordinary, non-recurring task skips the choice and opens straight
-   * into editing, exactly as before — only a still-recurring virtual
-   * occurrence triggers the choice.
-   */
-  function handleRowTap(row: FilteredRow) {
-    const isRecurringOccurrence = Boolean(row.occurrenceDate && row.editTask.recurrenceType !== 'none');
-    if (isRecurringOccurrence) {
-      setChoiceRow(row);
-    } else {
-      openEdit(row.editTask);
-    }
+  function openDetails(row: FilteredRow, initialAction: 'edit' | 'delete' | null = null) {
+    setDetailsRow(row);
+    setDetailsInitialAction(initialAction);
   }
 
-  function closeChoice() {
-    setChoiceRow(null);
+  function closeDetails() {
+    setDetailsRow(null);
+    setDetailsInitialAction(null);
   }
 
-  function chooseEditOccurrence() {
-    if (!choiceRow || !choiceRow.occurrenceDate || !choiceRow.seriesId) return;
-    setEditingTask({ ...choiceRow.editTask, dueDate: choiceRow.occurrenceDate });
+  /** "Entire series" edit — always edits the series' own stored row, mirroring CalendarPage/TodayPage. */
+  function editSeriesFromDetails() {
+    if (!detailsRow) return;
+    openEdit(detailsRow.editTask);
+    closeDetails();
+  }
+
+  /** "This occurrence" edit — prefills with this occurrence's effective data, anchored to its own date. */
+  function editOccurrenceFromDetails() {
+    if (!detailsRow || !detailsRow.occurrenceDate || !detailsRow.seriesId) return;
+    setEditingTask({ ...detailsRow.editTask, dueDate: detailsRow.occurrenceDate });
     setSheetHidesRecurrence(true);
-    setOverrideContext({ seriesId: choiceRow.seriesId, date: choiceRow.occurrenceDate });
-    setChoiceRow(null);
+    setOverrideContext({ seriesId: detailsRow.seriesId, date: detailsRow.occurrenceDate });
+    closeDetails();
     setSheetOpen(true);
   }
 
-  function chooseEditSeries() {
-    if (!choiceRow) return;
-    openEdit(choiceRow.editTask);
-    setChoiceRow(null);
+  async function deleteSeriesFromDetails() {
+    if (!detailsRow) return;
+    await deleteTask(detailsRow.seriesId ?? detailsRow.editTask.id);
+    closeDetails();
+  }
+
+  async function deleteOccurrenceFromDetails() {
+    if (!detailsRow || !detailsRow.occurrenceDate || !detailsRow.seriesId) return;
+    const overrideId = detailsRow.editTask.recurrenceParentId ? detailsRow.editTask.id : undefined;
+    await deleteTaskOccurrence(detailsRow.seriesId, detailsRow.occurrenceDate, overrideId);
+    closeDetails();
   }
 
   function handleToggle(row: { row: Task; occurrenceDate?: string; seriesId?: string }) {
-    if (row.seriesId && row.occurrenceDate && row.row.recurrenceType !== 'none') {
+    if (row.seriesId && row.occurrenceDate) {
       // A computed occurrence of a still-recurring series — toggle just
       // this date's completion, never the series' own row.
       void setTaskOccurrenceCompletion(row.seriesId, row.occurrenceDate, row.row.status !== 'completed');
@@ -412,10 +424,13 @@ export default function TasksPage() {
                   key={row.occurrenceDate ? `${row.seriesId}::${row.occurrenceDate}` : row.row.id}
                   task={row.row}
                   onToggle={() => handleToggle(row)}
-                  onOpen={() => handleRowTap(row)}
+                  onOpen={() => openDetails(row)}
+                  onEditRequest={() => openDetails(row, 'edit')}
+                  onDeleteRequest={() => openDetails(row, 'delete')}
                   hasReminder={reminders.some((r) => r.taskId === row.editTask.id)}
                   overdue={isOverdueRow}
                   dateLabel={dateLabel}
+                  isRecurring={Boolean(row.occurrenceDate)}
                 />
               );
             })
@@ -457,24 +472,37 @@ export default function TasksPage() {
         }
       />
 
-      {choiceRow && (
-        <div className="add-task-overlay" role="dialog" aria-modal="true" aria-label="Edit recurring task">
-          <Card padding="lg" className="tasks-occurrence-choice">
-            <p className="tasks-occurrence-choice__title">Edit just this occurrence, or the whole series?</p>
-            <div className="tasks-occurrence-choice__actions">
-              <Button variant="ghost" fullWidth onClick={closeChoice}>
-                Cancel
-              </Button>
-              <Button variant="secondary" fullWidth onClick={chooseEditOccurrence}>
-                This occurrence
-              </Button>
-              <Button fullWidth onClick={chooseEditSeries}>
-                Entire series
-              </Button>
-            </div>
-          </Card>
-        </div>
-      )}
+      <TaskDetailsSheet
+        open={Boolean(detailsRow)}
+        task={detailsRow ? detailsRow.row : null}
+        reminder={detailsRow ? reminders.find((r) => r.taskId === detailsRow.editTask.id) ?? null : null}
+        recurrenceLabel={
+          detailsRow?.occurrenceDate
+            ? describeRecurrence(
+                {
+                  type: (tasks.find((tsk) => tsk.id === detailsRow.seriesId) ?? detailsRow.editTask).recurrenceType,
+                  daysOfWeek: (tasks.find((tsk) => tsk.id === detailsRow.seriesId) ?? detailsRow.editTask)
+                    .recurrenceDaysOfWeek,
+                },
+                (tasks.find((tsk) => tsk.id === detailsRow.seriesId) ?? detailsRow.editTask).dueDate ??
+                  detailsRow.occurrenceDate,
+              )
+            : null
+        }
+        isRecurringOccurrence={Boolean(detailsRow?.occurrenceDate && detailsRow?.seriesId)}
+        initialAction={detailsInitialAction}
+        onClose={closeDetails}
+        onEdit={editSeriesFromDetails}
+        onEditOccurrence={editOccurrenceFromDetails}
+        onEditSeries={editSeriesFromDetails}
+        onDeleteOccurrence={deleteOccurrenceFromDetails}
+        onDeleteSeries={deleteSeriesFromDetails}
+        onDelete={async () => {
+          if (!detailsRow) return;
+          await deleteTask(detailsRow.seriesId ?? detailsRow.editTask.id);
+          closeDetails();
+        }}
+      />
     </>
   );
 }
