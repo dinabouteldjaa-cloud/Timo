@@ -168,6 +168,7 @@ export default function TaskRow({
   }
 
   return (
+<<<<<<< HEAD
     <div className={`task-row-swipe-wrap ${overdue ? 'task-row-swipe-wrap--overdue' : ''}`} ref={wrapRef}>
       <div className="task-row-swipe-clip">
         {swipeEnabled && (
@@ -265,6 +266,103 @@ export default function TaskRow({
           <div className="task-row__badges">
             <Badge tone={task.priority}>{t.priority[task.priority]}</Badge>
           </div>
+=======
+    <div className="task-row-swipe-wrap" ref={wrapRef}>
+      {swipeEnabled && (
+        <div className="task-row-swipe-actions" aria-hidden={!isSwipeOpen}>
+          {onEditRequest && (
+            <button
+              type="button"
+              className="task-row-swipe-action task-row-swipe-action--edit"
+              tabIndex={isSwipeOpen ? 0 : -1}
+              onClick={() => {
+                closeSwipe();
+                onEditRequest(task);
+              }}
+            >
+              Edit
+            </button>
+          )}
+          {onDeleteRequest && (
+            <button
+              type="button"
+              className="task-row-swipe-action task-row-swipe-action--delete"
+              tabIndex={isSwipeOpen ? 0 : -1}
+              onClick={() => {
+                closeSwipe();
+                onDeleteRequest(task);
+              }}
+            >
+              Delete
+            </button>
+          )}
+        </div>
+      )}
+
+      <div
+        className={`task-row ${done ? 'task-row--done' : ''} ${onOpen ? 'task-row--clickable' : ''} ${overdue ? 'task-row--overdue' : ''}`}
+        style={{ transform: `translateX(${dragX}px)`, transition: dragging ? 'none' : 'transform 0.2s ease' }}
+        onClick={handleOpen}
+        onKeyDown={handleKeyDown}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        role={onOpen ? 'button' : undefined}
+        tabIndex={onOpen ? 0 : undefined}
+      >
+        {/* This wrapper is a plain <div>, not a <button> — it exists only to
+            stop the checkbox's click/keyboard activation from also bubbling
+            up and opening details. The Checkbox itself is a real <button>
+            rendered as a child of this div, which is valid HTML; only a
+            literal <button> nested inside another <button> would be invalid,
+            and the outer row here is a div with role="button", not one. */}
+        <div
+          className="task-row__checkbox-wrap"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <Checkbox checked={done} onChange={() => onToggle?.(task.id)} aria-label={task.title} />
+        </div>
+        <div className="task-row__body">
+          <p className="task-row__title">
+            {task.title}
+            {isRecurring && (
+              <span className="task-row__recurring-icon" aria-label="Recurring task">
+                ↻
+              </span>
+            )}
+            {hasReminder && (
+              <svg
+                className="task-row__reminder-icon"
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-label="Reminder set"
+              >
+                <path
+                  d="M12 4a5 5 0 00-5 5v3.2c0 .5-.18.98-.5 1.36L5 15.5c-.6.7-.1 1.8.8 1.8h12.4c.9 0 1.4-1.1.8-1.8l-1.5-1.94a2.1 2.1 0 01-.5-1.36V9a5 5 0 00-5-5z"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinejoin="round"
+                />
+                <path d="M10 19.5a2 2 0 004 0" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+            )}
+          </p>
+          <p className="task-row__meta">
+            {overdue && (
+              <span className="task-row__overdue-text">
+                {t.tasks.filterOverdue}
+                {metaParts.length > 0 && ' • '}
+              </span>
+            )}
+            {metaParts.join(' • ')}
+          </p>
+        </div>
+        <div className="task-row__badges">
+          <Badge tone={task.priority}>{t.priority[task.priority]}</Badge>
+>>>>>>> d4bb4772404f4c2f4af190a38b3f0ae6b220f93d
         </div>
       </div>
     </div>
