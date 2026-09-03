@@ -3,6 +3,10 @@
   align-items: flex-start;
   gap: var(--space-3);
   padding: var(--space-3) 0;
+  background: var(--color-surface);
+  position: relative;
+  z-index: 1;
+  touch-action: pan-y;
 }
 
 .task-row--clickable {
@@ -78,4 +82,45 @@
   align-items: flex-end;
   gap: 4px;
   flex-shrink: 0;
+}
+
+.task-row__recurring-icon {
+  display: inline-block;
+  margin-left: 6px;
+  color: var(--color-text-faint);
+  font-size: 12px;
+  vertical-align: -1px;
+}
+
+/* Swipe-left actions (touch only) — the row itself slides via
+   `transform: translateX(...)` (set inline in TaskRow.tsx) to reveal
+   these two buttons, which sit absolutely positioned underneath it. */
+.task-row-swipe-wrap {
+  position: relative;
+  overflow: hidden;
+}
+
+.task-row-swipe-actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+}
+
+.task-row-swipe-action {
+  width: 66px;
+  border: none;
+  color: white;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.task-row-swipe-action--edit {
+  background: var(--color-primary);
+}
+
+.task-row-swipe-action--delete {
+  background: var(--color-error);
 }
