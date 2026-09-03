@@ -37,6 +37,15 @@ interface TaskDetailsSheetProps {
   onEditSeries?: () => void;
   onDeleteOccurrence?: () => void | Promise<void>;
   onDeleteSeries?: () => void | Promise<void>;
+  /**
+   * Opens the sheet already showing its own Edit or Delete flow (the
+   * exact same internal branch handleEditTap/handleDeleteTap would
+   * trigger) — used so a swipe-left action can jump straight to the
+   * relevant action without a second tap, while still going through
+   * this same, single, already-correct choice/confirm logic rather than
+   * a separate implementation.
+   */
+  initialAction?: 'edit' | 'delete' | null;
 }
 
 export default function TaskDetailsSheet({
@@ -53,6 +62,7 @@ export default function TaskDetailsSheet({
   onEditSeries,
   onDeleteOccurrence,
   onDeleteSeries,
+  initialAction,
 }: TaskDetailsSheetProps) {
   const { t } = useLocale();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -60,14 +70,45 @@ export default function TaskDetailsSheet({
   const [editChoiceOpen, setEditChoiceOpen] = useState(false);
   const [deleteChoiceOpen, setDeleteChoiceOpen] = useState(false);
 
+  const offersThisOccurrenceChoice =
+    isRecurringOccurrence && onEditOccurrence && onEditSeries && onDeleteOccurrence && onDeleteSeries;
+
   useEffect(() => {
     if (open) {
-      setConfirmingDelete(false);
-      setDeleting(false);
-      setEditChoiceOpen(false);
-      setDeleteChoiceOpen(false);
+      // Route initialAction through the SAME handleEditTap/handleDeleteTap
+      // branches a normal in-sheet button tap would use, rather than
+      // setting internal state directly — so this can never drift from
+      // that logic.
+      if (initialAction === 'edit') {
+        if (offersThisOccurrenceChoice) {
+          setEditChoiceOpen(true);
+          setDeleteChoiceOpen(false);
+          setConfirmingDelete(false);
+        } else {
+          setEditChoiceOpen(false);
+          setDeleteChoiceOpen(false);
+          setConfirmingDelete(false);
+          onEdit();
+        }
+      } else if (initialAction === 'delete') {
+        if (offersThisOccurrenceChoice) {
+          setDeleteChoiceOpen(true);
+          setEditChoiceOpen(false);
+          setConfirmingDelete(false);
+        } else {
+          setEditChoiceOpen(false);
+          setDeleteChoiceOpen(false);
+          setConfirmingDelete(true);
+        }
+      } else {
+        setConfirmingDelete(false);
+        setDeleting(false);
+        setEditChoiceOpen(false);
+        setDeleteChoiceOpen(false);
+      }
     }
-  }, [open, task]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, task, initialAction]);
 
   if (!open || !task) return null;
 
@@ -78,9 +119,6 @@ export default function TaskDetailsSheet({
         day: 'numeric',
       }).format(new Date(`${task.dueDate}T00:00:00`))
     : null;
-
-  const offersThisOccurrenceChoice =
-    isRecurringOccurrence && onEditOccurrence && onEditSeries && onDeleteOccurrence && onDeleteSeries;
 
   function handleEditTap() {
     if (offersThisOccurrenceChoice) {

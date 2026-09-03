@@ -23,12 +23,20 @@
   position: relative;
   padding-left: var(--space-3);
   margin-left: calc(-1 * var(--space-3));
+<<<<<<< HEAD
   /* A very light warm wash across the row — overdue reads as a state
      the row is IN, not another attribute competing with the priority
      pill. Deliberately much lighter than --color-overdue-soft (used
      for small badge-sized areas elsewhere) since a full-row wash reads
      as far more saturated than the same color on a small badge. */
   background: var(--color-overdue-wash);
+=======
+  /* A very light warm tint across the whole row — overdue reads as a
+     state the row is IN, not another attribute competing with the
+     priority pill. Kept soft/calm, matching the same restrained coral
+     already used for the left accent bar below. */
+  background: var(--color-overdue-soft);
+>>>>>>> d4bb4772404f4c2f4af190a38b3f0ae6b220f93d
 }
 
 .task-row--overdue::before {
@@ -101,6 +109,7 @@
 
 /* Swipe-left actions (touch only) — the row itself slides via
    `transform: translateX(...)` (set inline in TaskRow.tsx) to reveal
+<<<<<<< HEAD
    these two buttons. Split into two layers:
      - .task-row-swipe-wrap: NOT clipped. This is where the overdue
        background lives, as a ::before that bleeds past the row's own
@@ -132,18 +141,34 @@
   right: calc(-1 * var(--space-5));
   background: var(--color-overdue-wash);
   pointer-events: none;
+=======
+   these two buttons. Each row's actions live INSIDE that row's own
+   wrap, sized to exactly that row's height — they can never overlap an
+   adjacent row above/below, and are clipped to a shape that rounds
+   cleanly with the row rather than reading as a separate floating slab.
+   Rows are no longer direct siblings of each other (each is nested one
+   level inside its own wrap now), so the row-separator border moves
+   here, at the wrap level, to keep working correctly. */
+.task-row-swipe-wrap {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+>>>>>>> d4bb4772404f4c2f4af190a38b3f0ae6b220f93d
 }
 
 .task-row-swipe-wrap + .task-row-swipe-wrap {
   border-top: 1px solid var(--color-border-soft);
 }
 
+<<<<<<< HEAD
 .task-row-swipe-clip {
   position: relative;
   overflow: hidden;
   border-radius: var(--radius-sm);
 }
 
+=======
+>>>>>>> d4bb4772404f4c2f4af190a38b3f0ae6b220f93d
 .task-row-swipe-actions {
   position: absolute;
   inset: 0;

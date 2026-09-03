@@ -88,7 +88,19 @@ export function expandTaskOccurrences(
 
       const override = overrideByKey.get(key);
       const effective = override ?? task;
-      const completed = override ? override.status === 'completed' : completions.has(key);
+      // Completion for a recurring occurrence — whether resolved through
+      // an override or computed virtually — always comes from
+      // task_occurrence_completions, keyed on (seriesId, date). `key`
+      // here is already exactly that pair: this loop only ever reaches
+      // series parents (override rows are skipped via the
+      // `recurrenceParentId` check above), so `task.id` in `key` IS the
+      // series id. An override's own `status` column is a leftover of
+      // it being an ordinary task row and must never become an
+      // independent completion source — otherwise toggling completion
+      // (which always writes to task_occurrence_completions, see
+      // AppStateContext's setTaskOccurrenceCompletion) could silently
+      // have no visible effect for an edited occurrence.
+      const completed = completions.has(key);
 
       results.push({
         virtualId: key,
