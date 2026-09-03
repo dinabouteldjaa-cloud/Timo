@@ -5,7 +5,7 @@ import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import Badge from '../../components/ui/Badge';
 import EmptyState from '../../components/ui/EmptyState';
-import TimoAvatar from '../../components/avatar/TimoAvatar';
+import TimoMascot from '../../components/ui/TimoMascot';
 import { useAppState, type NewTaskInput } from '../../state/AppStateContext';
 import { planMyDay } from '../../lib/planMyDayApi';
 import { toISODate } from '../../lib/utils';
@@ -326,7 +326,9 @@ export default function PlanMyDayPage() {
       <div className="plan-my-day-page">
         {step === 'loading' && (
           <div className="plan-my-day-loading">
-            <TimoAvatar state="thinking" size="lg" />
+            <div className="plan-my-day-loading__mascot">
+              <TimoMascot variant="thinking" className="timo-mascot--floating" />
+            </div>
             <p>Timo is planning your day…</p>
           </div>
         )}
@@ -459,14 +461,18 @@ export default function PlanMyDayPage() {
 
         {step === 'saving' && (
           <div className="plan-my-day-loading">
-            <TimoAvatar state="focused" size="lg" />
+            <div className="plan-my-day-loading__mascot">
+              <TimoMascot variant="resting" />
+            </div>
             <p>Saving your plan…</p>
           </div>
         )}
 
         {step === 'done' && (
           <div className="plan-my-day-done">
-            <TimoAvatar state="celebrating" size="lg" />
+            <div className="plan-my-day-loading__mascot">
+              <TimoMascot variant="celebrating" />
+            </div>
             <p className="plan-my-day-done__message">{resultMessage}</p>
             <Button fullWidth size="lg" onClick={handleBack}>
               Back to Today

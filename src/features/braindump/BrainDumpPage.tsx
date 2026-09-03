@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import Header from '../../components/layout/Header';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
-import TimoAvatar from '../../components/avatar/TimoAvatar';
 import TimoMascot from '../../components/ui/TimoMascot';
 import { useAppState, type ReminderSelection } from '../../state/AppStateContext';
 import { organizeBrainDump } from '../../lib/brainDumpApi';
@@ -364,14 +363,18 @@ export default function BrainDumpPage() {
 
         {step === 'saving' && (
           <div className="brain-dump-loading">
-            <TimoAvatar state="focused" size="lg" />
+            <div className="brain-dump-loading__mascot">
+              <TimoMascot variant="resting" />
+            </div>
             <p>Adding to Timo…</p>
           </div>
         )}
 
         {step === 'done' && (
           <div className="brain-dump-done">
-            <TimoAvatar state="celebrating" size="lg" />
+            <div className="brain-dump-loading__mascot">
+              <TimoMascot variant="celebrating" />
+            </div>
             <p className="brain-dump-done__message">{resultMessage}</p>
             <Button fullWidth size="lg" onClick={handleBack}>
               Back to Today

@@ -5,3 +5,28 @@
   object-position: center;
   display: block;
 }
+
+/* Optional, subtle "breathing"/float animation for full-page loading
+   states — deliberately calm and slow, never a spin/bounce. Consuming
+   pages opt in via className="timo-mascot--floating" (passed through
+   TimoMascot's existing className prop), so most usages (Today's hero,
+   Brain Dump's input card, etc.) are completely unaffected. */
+@keyframes timo-mascot-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+.timo-mascot--floating {
+  animation: timo-mascot-float 3.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timo-mascot--floating {
+    animation: none;
+  }
+}

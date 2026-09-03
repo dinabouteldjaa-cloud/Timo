@@ -9,3 +9,20 @@
   font-size: 14px;
   font-weight: 600;
 }
+
+.protected-loading__mascot {
+  width: 96px;
+  height: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.protected-loading__mascot .timo-mascot {
+  width: 100%;
+  height: 100%;
+  /* Same scoped approach used elsewhere for the white-background mascot
+     PNGs — blends into the page instead of showing an opaque square.
+     Scoped to this instance only; TimoMascot's own CSS is untouched. */
+  mix-blend-mode: multiply;
+}
