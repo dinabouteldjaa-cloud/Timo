@@ -95,6 +95,24 @@ export default function TasksPage() {
   const [detailsRow, setDetailsRow] = useState<FilteredRow | null>(null);
   const [detailsInitialAction, setDetailsInitialAction] = useState<'edit' | 'delete' | null>(null);
 
+  // "All" shows one row per recurring series (its current/next pending
+  // occurrence) rather than every future date. Without this, completing
+  // that occurrence's checkbox would immediately recompute to the NEXT
+  // pending occurrence — making the checkbox look like it did nothing,
+  // and letting repeated taps silently complete several future
+  // occurrences in a row. Once a specific occurrence has been toggled
+  // from All, this pins that exact date so All keeps showing it (now
+  // reflecting its real, current completion state) instead of jumping
+  // ahead — purely a display choice, not a change to how completion
+  // itself is stored. Cleared whenever the filter changes (including
+  // switching away and back to "all"), and naturally reset entirely on
+  // leaving/re-entering the Tasks page, since this is local component
+  // state.
+  const [pinnedAllOccurrence, setPinnedAllOccurrence] = useState<Record<string, string>>({});
+  useEffect(() => {
+    setPinnedAllOccurrence({});
+  }, [filter]);
+
   // Drives "now" for overdue/date calculations below. Ticks once a
   // minute — never higher-frequency — which is exactly enough
   // resolution for a due TIME (HH:MM) to be detected as passed, and for
@@ -298,9 +316,18 @@ export default function TasksPage() {
         if (task.recurrenceType === 'none') {
           return { row: task, editTask: task };
         }
-        const nextOccurrence = occurrences
-          .filter((occ) => occ.seriesId === task.id && !occ.completed)
-          .sort((a, b) => a.date.localeCompare(b.date))[0];
+        const pinnedDate = pinnedAllOccurrence[task.id];
+        // If this series' occurrence was just toggled from All, keep
+        // showing that exact date (now reflecting its current completion
+        // state) instead of recomputing to whichever is next pending.
+        const pinnedOccurrence = pinnedDate
+          ? occurrences.find((occ) => occ.seriesId === task.id && occ.date === pinnedDate)
+          : undefined;
+        const nextOccurrence =
+          pinnedOccurrence ??
+          occurrences
+            .filter((occ) => occ.seriesId === task.id && !occ.completed)
+            .sort((a, b) => a.date.localeCompare(b.date))[0];
         if (!nextOccurrence) {
           return { row: task, editTask: task };
         }
@@ -311,7 +338,7 @@ export default function TasksPage() {
           seriesId: nextOccurrence.seriesId,
         };
       });
-  }, [filter, tasks, occurrences, pastOccurrences, todayISO, nowTimeHHMM]);
+  }, [filter, tasks, occurrences, pastOccurrences, todayISO, nowTimeHHMM, pinnedAllOccurrence]);
 
   function openAdd() {
     setEditingTask(null);
@@ -376,6 +403,14 @@ export default function TasksPage() {
 
   function handleToggle(row: { row: Task; occurrenceDate?: string; seriesId?: string }) {
     if (row.seriesId && row.occurrenceDate) {
+      if (filter === 'all') {
+        // Lock "All" to keep showing this exact occurrence (see
+        // pinnedAllOccurrence above) rather than jumping to the next
+        // pending one the instant it's marked complete.
+        const seriesId = row.seriesId;
+        const occurrenceDate = row.occurrenceDate;
+        setPinnedAllOccurrence((prev) => ({ ...prev, [seriesId]: occurrenceDate }));
+      }
       // A computed occurrence of a still-recurring series — toggle just
       // this date's completion, never the series' own row.
       void setTaskOccurrenceCompletion(row.seriesId, row.occurrenceDate, row.row.status !== 'completed');
