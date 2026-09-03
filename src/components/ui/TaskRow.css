@@ -3,6 +3,10 @@
   align-items: flex-start;
   gap: var(--space-3);
   padding: var(--space-3) 0;
+  background: var(--color-surface);
+  position: relative;
+  z-index: 1;
+  touch-action: pan-y;
 }
 
 .task-row--clickable {
@@ -15,14 +19,16 @@
   border-radius: var(--radius-sm);
 }
 
-.task-row + .task-row {
-  border-top: 1px solid var(--color-border-soft);
-}
-
 .task-row--overdue {
   position: relative;
   padding-left: var(--space-3);
   margin-left: calc(-1 * var(--space-3));
+  /* A very light warm wash across the row — overdue reads as a state
+     the row is IN, not another attribute competing with the priority
+     pill. Deliberately much lighter than --color-overdue-soft (used
+     for small badge-sized areas elsewhere) since a full-row wash reads
+     as far more saturated than the same color on a small badge. */
+  background: var(--color-overdue-wash);
 }
 
 .task-row--overdue::before {
@@ -72,10 +78,101 @@
   font-weight: 500;
 }
 
+.task-row__overdue-text {
+  color: var(--color-overdue);
+  font-weight: 700;
+}
+
 .task-row__badges {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 4px;
   flex-shrink: 0;
+}
+
+.task-row__recurring-icon {
+  display: inline-block;
+  margin-left: 6px;
+  color: var(--color-text-faint);
+  font-size: 12px;
+  vertical-align: -1px;
+}
+
+/* Swipe-left actions (touch only) — the row itself slides via
+   `transform: translateX(...)` (set inline in TaskRow.tsx) to reveal
+   these two buttons. Split into two layers:
+     - .task-row-swipe-wrap: NOT clipped. This is where the overdue
+       background lives, as a ::before that bleeds past the row's own
+       box out to the surrounding Card's padding edges (see
+       --space-5 below, matching Card padding="md" used by every current
+       consumer of TaskRow) — overflow:hidden here would clip that bleed
+       right back to the row's normal width, so it deliberately isn't
+       applied at this level.
+     - .task-row-swipe-clip: clipped (overflow:hidden + rounded), hosts
+       the actual row + revealed actions. This is what bounds the swipe
+       geometry and rounds the actions' corners — completely unaffected
+       by the overdue background layer above it, since that lives on a
+       separate, unclipped ancestor.
+   Each row's actions live INSIDE that row's own clip container, sized
+   to exactly that row's height — they can never overlap an adjacent row
+   above/below. Rows are no longer direct siblings of each other (each
+   is nested inside its own wrap now), so the row-separator border lives
+   at the wrap level to keep working correctly. */
+.task-row-swipe-wrap {
+  position: relative;
+}
+
+.task-row-swipe-wrap--overdue::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(-1 * var(--space-5));
+  right: calc(-1 * var(--space-5));
+  background: var(--color-overdue-wash);
+  pointer-events: none;
+}
+
+.task-row-swipe-wrap + .task-row-swipe-wrap {
+  border-top: 1px solid var(--color-border-soft);
+}
+
+.task-row-swipe-clip {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+}
+
+.task-row-swipe-actions {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: flex-end;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+}
+
+.task-row-swipe-action {
+  width: 58px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  border: none;
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.task-row-swipe-action--edit {
+  background: var(--color-primary);
+}
+
+.task-row-swipe-action--delete {
+  /* Softer, Timo-compatible coral — deliberately not the harsher, more
+     alarming --color-error red used for destructive confirms elsewhere. */
+  background: var(--color-overdue);
 }

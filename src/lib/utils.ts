@@ -23,17 +23,42 @@ export function formatFriendlyDate(locale: Locale, date: Date = new Date()) {
  * sept.", via Intl.DateTimeFormat). Used by Tasks > Upcoming, where the
  * date isn't otherwise implied by which list a row is in.
  */
-export function formatUpcomingDateLabel(
+/**
+ * A short, locale-aware date-context label for a task row, applied
+ * consistently across every Tasks filter (All/Today/Overdue/Upcoming/
+ * Completed) — not just Upcoming.
+ *   - due today -> the caller's localized "Today"
+ *   - due tomorrow -> the caller's localized "Tomorrow"
+ *   - due yesterday -> the caller's localized "Yesterday"
+ *   - due later within the CURRENT calendar week (Sunday–Saturday,
+ *     inclusive, ending this week's Saturday) -> the weekday name via
+ *     Intl.DateTimeFormat (never a hard-coded weekday string, so this
+ *     works correctly in any locale)
+ *   - anything else (further future, or past and not yesterday) -> a
+ *     short explicit date via Intl.DateTimeFormat, e.g. "Sep 12" / "12
+ *     sept."
+ */
+export function formatTaskRowDateLabel(
   locale: Locale,
   dateISO: string,
   todayISO: string,
-  tomorrowLabel: string,
+  labels: { today: string; tomorrow: string; yesterday: string },
 ): string {
-  if (dateISO === addDays(todayISO, 1)) return tomorrowLabel;
-  return new Intl.DateTimeFormat(locale === 'fr' ? 'fr-FR' : 'en-US', {
-    month: 'short',
-    day: 'numeric',
-  }).format(parseISODate(dateISO));
+  if (dateISO === todayISO) return labels.today;
+  if (dateISO === addDays(todayISO, 1)) return labels.tomorrow;
+  if (dateISO === addDays(todayISO, -1)) return labels.yesterday;
+
+  const intlLocale = locale === 'fr' ? 'fr-FR' : 'en-US';
+
+  if (dateISO > todayISO) {
+    const daysUntilSaturday = 6 - parseISODate(todayISO).getDay();
+    const currentWeekEndISO = addDays(todayISO, daysUntilSaturday);
+    if (dateISO <= currentWeekEndISO) {
+      return new Intl.DateTimeFormat(intlLocale, { weekday: 'long' }).format(parseISODate(dateISO));
+    }
+  }
+
+  return new Intl.DateTimeFormat(intlLocale, { month: 'short', day: 'numeric' }).format(parseISODate(dateISO));
 }
 
 /** Parses a 'YYYY-MM-DD' string as a local date (avoids UTC offset surprises). */

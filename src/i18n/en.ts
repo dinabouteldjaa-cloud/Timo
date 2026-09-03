@@ -38,6 +38,7 @@ const en = {
     filterUpcoming: 'Upcoming',
     filterCompleted: 'Completed',
     tomorrow: 'Tomorrow',
+    yesterday: 'Yesterday',
     addTask: 'Add task',
     emptyTitle: 'No tasks here',
     emptySubtitle: 'Tasks you add will show up in this list.',
