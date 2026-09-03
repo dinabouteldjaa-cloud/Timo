@@ -19,10 +19,6 @@
   border-radius: var(--radius-sm);
 }
 
-.task-row + .task-row {
-  border-top: 1px solid var(--color-border-soft);
-}
-
 .task-row--overdue {
   position: relative;
   padding-left: var(--space-3);
@@ -94,25 +90,42 @@
 
 /* Swipe-left actions (touch only) — the row itself slides via
    `transform: translateX(...)` (set inline in TaskRow.tsx) to reveal
-   these two buttons, which sit absolutely positioned underneath it. */
+   these two buttons. Each row's actions live INSIDE that row's own
+   wrap, sized to exactly that row's height — they can never overlap an
+   adjacent row above/below, and are clipped to a shape that rounds
+   cleanly with the row rather than reading as a separate floating slab.
+   Rows are no longer direct siblings of each other (each is nested one
+   level inside its own wrap now), so the row-separator border moves
+   here, at the wrap level, to keep working correctly. */
 .task-row-swipe-wrap {
   position: relative;
   overflow: hidden;
+  border-radius: var(--radius-sm);
+}
+
+.task-row-swipe-wrap + .task-row-swipe-wrap {
+  border-top: 1px solid var(--color-border-soft);
 }
 
 .task-row-swipe-actions {
   position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
   display: flex;
+  justify-content: flex-end;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
 }
 
 .task-row-swipe-action {
-  width: 66px;
+  width: 58px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
   border: none;
   color: white;
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -122,5 +135,7 @@
 }
 
 .task-row-swipe-action--delete {
-  background: var(--color-error);
+  /* Softer, Timo-compatible coral — deliberately not the harsher, more
+     alarming --color-error red used for destructive confirms elsewhere. */
+  background: var(--color-overdue);
 }

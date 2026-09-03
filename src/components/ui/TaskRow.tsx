@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent, type TouchEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type TouchEvent } from 'react';
 import type { Task } from '../../types/task';
 import { useLocale } from '../../i18n/LocaleContext';
 import { formatDuration, toISODate } from '../../lib/utils';
@@ -6,7 +6,7 @@ import Checkbox from './Checkbox';
 import Badge from './Badge';
 import './TaskRow.css';
 
-const MAX_SWIPE = 132; // px — width of the two revealed action buttons
+const MAX_SWIPE = 116; // px — width of the two revealed action buttons (58px each)
 const OPEN_THRESHOLD = 56; // px — how far to drag before it snaps open
 
 interface TaskRowProps {
@@ -54,11 +54,28 @@ export default function TaskRow({
   const touchStartY = useRef<number | null>(null);
   const horizontalSwipe = useRef(false);
   const startedOnCheckbox = useRef(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
 
   function closeSwipe() {
     setDragX(0);
     setIsSwipeOpen(false);
   }
+
+  // Tapping anywhere outside this row while its swipe actions are
+  // revealed closes them — including tapping another row, a filter
+  // chip, or the FAB. Each row tracks this independently; no
+  // coordination with sibling rows is needed since only one row's
+  // wrap can ever contain a given click target at a time.
+  useEffect(() => {
+    if (!isSwipeOpen) return;
+    function handleOutsidePointerDown(e: PointerEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        closeSwipe();
+      }
+    }
+    document.addEventListener('pointerdown', handleOutsidePointerDown);
+    return () => document.removeEventListener('pointerdown', handleOutsidePointerDown);
+  }, [isSwipeOpen]);
 
   function handleTouchStart(e: TouchEvent<HTMLDivElement>) {
     if (!swipeEnabled) return;
@@ -151,7 +168,7 @@ export default function TaskRow({
   }
 
   return (
-    <div className="task-row-swipe-wrap">
+    <div className="task-row-swipe-wrap" ref={wrapRef}>
       {swipeEnabled && (
         <div className="task-row-swipe-actions" aria-hidden={!isSwipeOpen}>
           {onEditRequest && (
