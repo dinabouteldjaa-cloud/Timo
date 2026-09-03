@@ -182,7 +182,23 @@ export default function TaskRow({
                   onEditRequest(task);
                 }}
               >
-                Edit
+                <svg
+                  className="task-row-swipe-action__icon"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M4 20l1.1-4.4a2 2 0 01.53-.95L15.6 4.68a1.9 1.9 0 012.69 0l1.03 1.03a1.9 1.9 0 010 2.69L9.35 18.37a2 2 0 01-.95.53L4 20z"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinejoin="round"
+                  />
+                  <path d="M13.5 6.5l4 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                </svg>
+                <span className="task-row-swipe-action__label">Edit</span>
               </button>
             )}
             {onDeleteRequest && (
@@ -195,7 +211,24 @@ export default function TaskRow({
                   onDeleteRequest(task);
                 }}
               >
-                Delete
+                <svg
+                  className="task-row-swipe-action__icon"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M5 7h14M9.5 7V5.2A1.2 1.2 0 0110.7 4h2.6a1.2 1.2 0 011.2 1.2V7M7.5 7l.7 12a1.5 1.5 0 001.5 1.4h4.6a1.5 1.5 0 001.5-1.4l.7-12"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path d="M10.3 10.5l.4 6M13.7 10.5l-.4 6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                </svg>
+                <span className="task-row-swipe-action__label">Delete</span>
               </button>
             )}
           </div>

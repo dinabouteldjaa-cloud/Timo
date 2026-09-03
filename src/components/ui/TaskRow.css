@@ -157,14 +157,24 @@
   width: 58px;
   flex-shrink: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 3px;
   text-align: center;
   border: none;
   color: white;
-  font-size: 12px;
-  font-weight: 700;
   cursor: pointer;
+}
+
+.task-row-swipe-action__icon {
+  display: block;
+}
+
+.task-row-swipe-action__label {
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .task-row-swipe-action--edit {
