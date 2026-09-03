@@ -41,6 +41,8 @@ const fr: Strings = {
     filterCompleted: 'Terminées',
     tomorrow: 'Demain',
     yesterday: 'Hier',
+    viewOlderCompleted: 'Voir les tâches terminées plus anciennes',
+    completedCount: '{shown} sur {total} terminées',
     addTask: 'Ajouter une tâche',
     emptyTitle: 'Aucune tâche ici',
     emptySubtitle: 'Les tâches que vous ajoutez apparaîtront dans cette liste.',

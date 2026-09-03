@@ -39,6 +39,8 @@ const en = {
     filterCompleted: 'Completed',
     tomorrow: 'Tomorrow',
     yesterday: 'Yesterday',
+    viewOlderCompleted: 'View older completed',
+    completedCount: '{shown} of {total} completed',
     addTask: 'Add task',
     emptyTitle: 'No tasks here',
     emptySubtitle: 'Tasks you add will show up in this list.',

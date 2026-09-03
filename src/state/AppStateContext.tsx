@@ -114,6 +114,8 @@ interface AppStateValue {
   taskOccurrenceCompletions: Set<string>;
   taskOccurrenceSkips: Set<string>;
   eventOccurrenceSkips: Set<string>;
+  /** Same keys as taskOccurrenceCompletions, mapped to each occurrence's completed_at — used to build the Completed tab's sorted history. */
+  taskOccurrenceCompletionRecords: Map<string, string>;
   setTaskOccurrenceCompletion: (taskId: string, occurrenceDate: string, completed: boolean) => Promise<void>;
   deleteTaskOccurrence: (seriesId: string, occurrenceDate: string, overrideTaskId?: string) => Promise<void>;
   saveTaskOccurrenceOverride: (seriesId: string, occurrenceDate: string, input: NewTaskInput) => Promise<Task>;
@@ -290,6 +292,15 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   // occurrences ever get an entry, never one row per calendar date.
   const [taskOccurrenceCompletions, setTaskOccurrenceCompletions] = useState<Set<string>>(new Set());
   const [taskOccurrenceSkips, setTaskOccurrenceSkips] = useState<Set<string>>(new Set());
+  // Same (taskId, date) pairs as taskOccurrenceCompletions above, but
+  // carrying each one's completed_at timestamp — used only to build the
+  // Completed tab's sorted history (see resolveCompletedTaskOccurrences
+  // in src/lib/occurrences.ts). Kept as a SEPARATE state from the plain
+  // Set above so expandTaskOccurrences's existing hot-path `.has(key)`
+  // checks are completely unaffected by this addition.
+  const [taskOccurrenceCompletionRecords, setTaskOccurrenceCompletionRecords] = useState<Map<string, string>>(
+    new Map(),
+  );
 
   // Load tasks whenever the signed-in user changes (login/logout/switch).
   useEffect(() => {
@@ -298,6 +309,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setTasksError(null);
       setTaskOccurrenceCompletions(new Set());
       setTaskOccurrenceSkips(new Set());
+      setTaskOccurrenceCompletionRecords(new Map());
       return;
     }
     let cancelled = false;
@@ -307,12 +319,14 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       tasksApi.fetchTasks(userId),
       tasksApi.fetchTaskOccurrenceCompletions(userId),
       tasksApi.fetchTaskOccurrenceSkips(userId),
+      tasksApi.fetchTaskOccurrenceCompletionRecords(userId),
     ])
-      .then(([loadedTasks, completions, skips]) => {
+      .then(([loadedTasks, completions, skips, completionRecords]) => {
         if (cancelled) return;
         setTasks(loadedTasks);
         setTaskOccurrenceCompletions(completions);
         setTaskOccurrenceSkips(skips);
+        setTaskOccurrenceCompletionRecords(completionRecords);
       })
       .catch((err: Error) => {
         // eslint-disable-next-line no-console
@@ -388,10 +402,18 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         const key = `${id}::${todayISO}`;
         const wasCompleted = taskOccurrenceCompletions.has(key);
         const nextCompleted = !wasCompleted;
+        const previousRecordValue = taskOccurrenceCompletionRecords.get(key);
+        const optimisticCompletedAt = new Date().toISOString();
 
         setTaskOccurrenceCompletions((prev) => {
           const next = new Set(prev);
           if (nextCompleted) next.add(key);
+          else next.delete(key);
+          return next;
+        });
+        setTaskOccurrenceCompletionRecords((prev) => {
+          const next = new Map(prev);
+          if (nextCompleted) next.set(key, optimisticCompletedAt);
           else next.delete(key);
           return next;
         });
@@ -408,6 +430,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           setTaskOccurrenceCompletions((prev) => {
             const next = new Set(prev);
             if (wasCompleted) next.add(key);
+            else next.delete(key);
+            return next;
+          });
+          setTaskOccurrenceCompletionRecords((prev) => {
+            const next = new Map(prev);
+            if (previousRecordValue !== undefined) next.set(key, previousRecordValue);
             else next.delete(key);
             return next;
           });
@@ -435,7 +463,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         setTasksError(err instanceof Error ? err.message : 'Could not update task.');
       }
     },
-    [tasks, userId, taskOccurrenceCompletions],
+    [tasks, userId, taskOccurrenceCompletions, taskOccurrenceCompletionRecords],
   );
 
   const deleteTask = useCallback(
@@ -487,9 +515,20 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       if (!userId) return;
       const key = `${taskId}::${occurrenceDate}`;
       const previous = taskOccurrenceCompletions;
+      const previousRecords = taskOccurrenceCompletionRecords;
+      const optimisticCompletedAt = new Date().toISOString();
       setTaskOccurrenceCompletions((prev) => {
         const next = new Set(prev);
         if (completed) next.add(key);
+        else next.delete(key);
+        return next;
+      });
+      // Optimistic timestamp for the Completed history — the DB's own
+      // default now() will set the real value on success; a page
+      // reload always picks up the authoritative one regardless.
+      setTaskOccurrenceCompletionRecords((prev) => {
+        const next = new Map(prev);
+        if (completed) next.set(key, optimisticCompletedAt);
         else next.delete(key);
         return next;
       });
@@ -503,10 +542,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         // eslint-disable-next-line no-console
         console.error('[AppState] setTaskOccurrenceCompletion failed', err);
         setTaskOccurrenceCompletions(previous);
+        setTaskOccurrenceCompletionRecords(previousRecords);
         setTasksError(err instanceof Error ? err.message : 'Could not update this occurrence.');
       }
     },
-    [userId, taskOccurrenceCompletions],
+    [userId, taskOccurrenceCompletions, taskOccurrenceCompletionRecords],
   );
 
   /**
@@ -954,6 +994,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       taskOccurrenceCompletions,
       taskOccurrenceSkips,
       eventOccurrenceSkips,
+      taskOccurrenceCompletionRecords,
       setTaskOccurrenceCompletion,
       deleteTaskOccurrence,
       saveTaskOccurrenceOverride,
@@ -995,6 +1036,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       taskOccurrenceCompletions,
       taskOccurrenceSkips,
       eventOccurrenceSkips,
+      taskOccurrenceCompletionRecords,
       setTaskOccurrenceCompletion,
       deleteTaskOccurrence,
       saveTaskOccurrenceOverride,

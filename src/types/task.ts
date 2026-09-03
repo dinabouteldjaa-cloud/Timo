@@ -40,6 +40,11 @@ export interface Task {
   // see src/lib/occurrences.ts for how this is used.
   recurrenceParentId?: string;
   recurrenceOccurrenceDate?: string;
+  // When status became 'completed' (set by tasksApi.setTaskStatus). Only
+  // meaningful when status === 'completed'; undefined otherwise. Used to
+  // sort the Completed history by actual completion time rather than
+  // due date.
+  completedAt?: string;
 }
 
 export type CalendarEventType = 'event' | 'meeting';

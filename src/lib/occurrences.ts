@@ -167,6 +167,73 @@ export function expandEventOccurrences(
   return results;
 }
 
+export interface CompletedTaskOccurrence extends TaskOccurrence {
+  completedAt: string;
+}
+
+/**
+ * Resolves completed recurring occurrences DIRECTLY from stored
+ * completion records (task_occurrence_completions), instead of
+ * expanding a wide — or unbounded — date range and filtering for
+ * completed ones. Each completion record already tells us exactly
+ * which (series, date) pair was completed, so this only ever does a
+ * couple of O(1) map lookups per record, regardless of how far back
+ * completion history goes or how long a series has existed. This is
+ * what makes it safe to use for a full "Completed history" view without
+ * ever calling getOccurrencesInRange over a huge span.
+ *
+ * Used only by the Completed tab's history — expandTaskOccurrences and
+ * its forward-looking, range-based expansion (used by Today/Upcoming/
+ * Overdue/All) are completely untouched by this.
+ */
+export function resolveCompletedTaskOccurrences(
+  tasks: Task[],
+  completionRecords: Map<string, string>,
+  skips: Set<string>,
+): CompletedTaskOccurrence[] {
+  const tasksById = new Map<string, Task>();
+  const overrideByKey = new Map<string, Task>();
+  for (const task of tasks) {
+    tasksById.set(task.id, task);
+    if (task.recurrenceParentId && task.recurrenceOccurrenceDate) {
+      overrideByKey.set(`${task.recurrenceParentId}::${task.recurrenceOccurrenceDate}`, task);
+    }
+  }
+
+  const results: CompletedTaskOccurrence[] = [];
+
+  for (const [key, completedAt] of completionRecords) {
+    // An occurrence explicitly removed via "This occurrence" delete
+    // must never surface, even if it happens to have a completion
+    // record from before it was removed — consistent with skips always
+    // being excluded everywhere else in the app (see
+    // expandTaskOccurrences above).
+    if (skips.has(key)) continue;
+
+    const [seriesId, date] = key.split('::');
+    const seriesParent = tasksById.get(seriesId);
+    // The series no longer exists locally — in practice this shouldn't
+    // happen, since task_occurrence_completions rows cascade-delete
+    // with their series (see 0011_recurring_tasks_events.sql), but skip
+    // defensively rather than rendering a broken row.
+    if (!seriesParent) continue;
+
+    const effective = overrideByKey.get(key) ?? seriesParent;
+
+    results.push({
+      virtualId: key,
+      date,
+      task: effective,
+      seriesId,
+      isRecurring: true,
+      completed: true,
+      completedAt,
+    });
+  }
+
+  return results;
+}
+
 /** Whether `dateISO` is a valid occurrence date of this specific task/event (single-date check, no range needed). */
 export function isDateAnOccurrence(
   item: { dueDate?: string; eventDate?: string } & {

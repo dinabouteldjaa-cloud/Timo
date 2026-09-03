@@ -53,6 +53,7 @@ function rowToTask(row: TaskRow): Task {
     recurrenceEndDate: row.recurrence_end_date ?? undefined,
     recurrenceParentId: row.recurrence_parent_id ?? undefined,
     recurrenceOccurrenceDate: row.recurrence_occurrence_date ?? undefined,
+    completedAt: row.completed_at ?? undefined,
   };
 }
 
@@ -282,6 +283,32 @@ export async function fetchTaskOccurrenceCompletions(userId: string): Promise<Se
 
   if (error) throw toSupabaseError('Could not load task completions', error);
   return new Set((data as { task_id: string; occurrence_date: string }[]).map((r) => `${r.task_id}::${r.occurrence_date}`));
+}
+
+/**
+ * The same completion records as fetchTaskOccurrenceCompletions above,
+ * but carrying each one's completed_at timestamp — needed to sort the
+ * Completed history by actual completion time. Deliberately a SEPARATE
+ * function/return shape rather than changing fetchTaskOccurrenceCompletions
+ * itself: that function's plain `Set<string>` is used in
+ * expandTaskOccurrences's hot path (re-run on every Today/Upcoming/
+ * Overdue/All recompute) purely for fast `.has(key)` membership checks,
+ * and widening its return type would touch that already-correct,
+ * frequently-exercised code for no benefit there. Returns a Map keyed by
+ * the identical `${taskId}::${occurrenceDate}` shape for consistency.
+ */
+export async function fetchTaskOccurrenceCompletionRecords(userId: string): Promise<Map<string, string>> {
+  const { data, error } = await supabase
+    .from('task_occurrence_completions')
+    .select('task_id, occurrence_date, completed_at')
+    .eq('user_id', userId);
+
+  if (error) throw toSupabaseError('Could not load completion history', error);
+  const map = new Map<string, string>();
+  for (const row of data as { task_id: string; occurrence_date: string; completed_at: string }[]) {
+    map.set(`${row.task_id}::${row.occurrence_date}`, row.completed_at);
+  }
+  return map;
 }
 
 /**

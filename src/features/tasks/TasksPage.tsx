@@ -4,9 +4,9 @@ import Card from '../../components/ui/Card';
 import TaskRow from '../../components/ui/TaskRow';
 import EmptyState from '../../components/ui/EmptyState';
 import IconButton from '../../components/ui/IconButton';
-import { useLocale } from '../../i18n/LocaleContext';
+import { useLocale, formatString } from '../../i18n/LocaleContext';
 import { useAppState } from '../../state/AppStateContext';
-import { expandTaskOccurrences } from '../../lib/occurrences';
+import { expandTaskOccurrences, resolveCompletedTaskOccurrences } from '../../lib/occurrences';
 import { describeRecurrence } from '../../lib/recurrence';
 import { toISODate, addDays, formatTaskRowDateLabel } from '../../lib/utils';
 import type { Task } from '../../types/task';
@@ -78,6 +78,7 @@ export default function TasksPage() {
     reminders,
     taskOccurrenceCompletions,
     taskOccurrenceSkips,
+    taskOccurrenceCompletionRecords,
     setTaskOccurrenceCompletion,
   } = useAppState();
   const [filter, setFilter] = useState<Filter>('all');
@@ -111,6 +112,18 @@ export default function TasksPage() {
   const [pinnedAllOccurrence, setPinnedAllOccurrence] = useState<Record<string, string>>({});
   useEffect(() => {
     setPinnedAllOccurrence({});
+  }, [filter]);
+
+  // How many of the newest completed items to show at once — an ITEM
+  // count, not a date window, so it stays bounded regardless of how many
+  // tasks a user completes in a short period. Resets back to the initial
+  // batch whenever the filter changes (including leaving and returning
+  // to "completed"), matching the same reset pattern already used for
+  // pinnedAllOccurrence above.
+  const COMPLETED_BATCH_SIZE = 30;
+  const [completedVisibleCount, setCompletedVisibleCount] = useState(COMPLETED_BATCH_SIZE);
+  useEffect(() => {
+    setCompletedVisibleCount(COMPLETED_BATCH_SIZE);
   }, [filter]);
 
   // Drives "now" for overdue/date calculations below. Ticks once a
@@ -172,6 +185,40 @@ export default function TasksPage() {
       status: occ.completed ? 'completed' : 'todo',
     };
   }
+
+  // The full Completed history, sorted NEWEST-COMPLETED-FIRST by the
+  // actual completed_at timestamp (never by due date or occurrence
+  // date). Recurring completions are resolved DIRECTLY from stored
+  // completion records via resolveCompletedTaskOccurrences — not from
+  // the forward-only `occurrences` expansion above, which only ever
+  // spans [today, today+60 days] and therefore can never contain a
+  // recurring occurrence that was completed yesterday or last week.
+  // Because resolveCompletedTaskOccurrences works from the completion
+  // records themselves (each one already says exactly which series and
+  // date was completed), this never needs to walk a wide or unbounded
+  // recurrence range just to discover what's been completed.
+  const completedHistory = useMemo(() => {
+    const nonRecurringCompleted = tasks
+      .filter((task) => task.status === 'completed' && task.recurrenceType === 'none' && !task.recurrenceParentId)
+      .map((task) => ({ row: task, editTask: task, completedAt: task.completedAt ?? '' }));
+
+    const recurringCompleted = resolveCompletedTaskOccurrences(
+      tasks,
+      taskOccurrenceCompletionRecords,
+      taskOccurrenceSkips,
+    ).map((occ) => ({
+      row: occurrenceAsTask(occ),
+      editTask: occ.task,
+      occurrenceDate: occ.date,
+      seriesId: occ.seriesId,
+      completedAt: occ.completedAt,
+    }));
+
+    return [...nonRecurringCompleted, ...recurringCompleted].sort((a, b) =>
+      b.completedAt.localeCompare(a.completedAt),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, taskOccurrenceCompletionRecords, taskOccurrenceSkips]);
 
   const filtered: FilteredRow[] = useMemo(() => {
     if (filter === 'today') {
@@ -279,18 +326,7 @@ export default function TasksPage() {
       );
     }
     if (filter === 'completed') {
-      const nonRecurringCompleted = tasks
-        .filter((task) => task.status === 'completed' && task.recurrenceType === 'none')
-        .map((task) => ({ row: task, editTask: task }));
-      const recurringCompleted = occurrences
-        .filter((occ) => occ.completed)
-        .map((occ) => ({
-          row: occurrenceAsTask(occ),
-          editTask: occ.task,
-          occurrenceDate: occ.date,
-          seriesId: occ.seriesId,
-        }));
-      return [...nonRecurringCompleted, ...recurringCompleted];
+      return completedHistory.slice(0, completedVisibleCount);
     }
     // "All" shows each task/series ONCE — never expanded into every
     // future date, since a flat list of every occurrence of every
@@ -338,7 +374,17 @@ export default function TasksPage() {
           seriesId: nextOccurrence.seriesId,
         };
       });
-  }, [filter, tasks, occurrences, pastOccurrences, todayISO, nowTimeHHMM, pinnedAllOccurrence]);
+  }, [
+    filter,
+    tasks,
+    occurrences,
+    pastOccurrences,
+    todayISO,
+    nowTimeHHMM,
+    pinnedAllOccurrence,
+    completedHistory,
+    completedVisibleCount,
+  ]);
 
   function openAdd() {
     setEditingTask(null);
@@ -474,6 +520,26 @@ export default function TasksPage() {
             })
           )}
         </Card>
+
+        {filter === 'completed' && completedHistory.length > 0 && (
+          <div className="tasks-completed-footer">
+            <p className="tasks-completed-footer__count">
+              {formatString(t.tasks.completedCount, {
+                shown: Math.min(completedVisibleCount, completedHistory.length),
+                total: completedHistory.length,
+              })}
+            </p>
+            {completedVisibleCount < completedHistory.length && (
+              <button
+                type="button"
+                className="tasks-completed-footer__more"
+                onClick={() => setCompletedVisibleCount((prev) => prev + COMPLETED_BATCH_SIZE)}
+              >
+                {t.tasks.viewOlderCompleted}
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <IconButton aria-label={t.tasks.addTask} className="tasks-fab" onClick={openAdd}>
