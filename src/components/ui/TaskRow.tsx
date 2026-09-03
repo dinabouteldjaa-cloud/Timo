@@ -251,10 +251,17 @@ export default function TaskRow({
               </svg>
             )}
           </p>
-          <p className="task-row__meta">{metaParts.join(' • ')}</p>
+          <p className="task-row__meta">
+            {overdue && (
+              <span className="task-row__overdue-text">
+                {t.tasks.filterOverdue}
+                {metaParts.length > 0 && ' • '}
+              </span>
+            )}
+            {metaParts.join(' • ')}
+          </p>
         </div>
         <div className="task-row__badges">
-          {overdue && <Badge tone="overdue">{t.tasks.filterOverdue}</Badge>}
           <Badge tone={task.priority}>{t.priority[task.priority]}</Badge>
         </div>
       </div>

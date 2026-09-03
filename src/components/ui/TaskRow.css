@@ -23,6 +23,11 @@
   position: relative;
   padding-left: var(--space-3);
   margin-left: calc(-1 * var(--space-3));
+  /* A very light warm tint across the whole row — overdue reads as a
+     state the row is IN, not another attribute competing with the
+     priority pill. Kept soft/calm, matching the same restrained coral
+     already used for the left accent bar below. */
+  background: var(--color-overdue-soft);
 }
 
 .task-row--overdue::before {
@@ -70,6 +75,11 @@
   font-size: 12px;
   color: var(--color-text-muted);
   font-weight: 500;
+}
+
+.task-row__overdue-text {
+  color: var(--color-overdue);
+  font-weight: 700;
 }
 
 .task-row__badges {
