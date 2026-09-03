@@ -8,11 +8,7 @@ import { useLocale } from '../../i18n/LocaleContext';
 import { useAppState } from '../../state/AppStateContext';
 import { expandTaskOccurrences } from '../../lib/occurrences';
 import { describeRecurrence } from '../../lib/recurrence';
-<<<<<<< HEAD
 import { toISODate, addDays, formatTaskRowDateLabel } from '../../lib/utils';
-=======
-import { toISODate, addDays, formatUpcomingDateLabel } from '../../lib/utils';
->>>>>>> d4bb4772404f4c2f4af190a38b3f0ae6b220f93d
 import type { Task } from '../../types/task';
 import AddTaskSheet from './AddTaskSheet';
 import TaskDetailsSheet from './TaskDetailsSheet';
