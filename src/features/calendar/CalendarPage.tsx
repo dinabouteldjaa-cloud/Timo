@@ -657,7 +657,22 @@ export default function CalendarPage() {
         open={Boolean(detailsTaskOccurrence)}
         task={
           detailsTaskOccurrence
-            ? { ...detailsTaskOccurrence.task, dueDate: detailsTaskOccurrence.date }
+            ? {
+                ...detailsTaskOccurrence.task,
+                dueDate: detailsTaskOccurrence.date,
+                // Fix: detailsTaskOccurrence.task is the SERIES PARENT
+                // for a non-override occurrence — its own `status`
+                // column is never meant to reflect any single
+                // occurrence's completion (that lives in
+                // task_occurrence_completions). Use the occurrence's own
+                // computed `completed` flag instead, exactly as
+                // TodayPage/TasksPage's synthetic display objects
+                // already do — an override's own status is unaffected
+                // either way, since detailsTaskOccurrence.completed is
+                // already derived from the override's own status in
+                // that case (see expandTaskOccurrences).
+                status: detailsTaskOccurrence.completed ? 'completed' : 'todo',
+              }
             : null
         }
         reminder={

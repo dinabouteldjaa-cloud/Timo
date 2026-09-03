@@ -45,3 +45,8 @@
   background: var(--color-success-soft);
   color: var(--color-success);
 }
+
+.badge--overdue {
+  background: var(--color-overdue-soft);
+  color: var(--color-overdue);
+}

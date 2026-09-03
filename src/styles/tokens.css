@@ -25,6 +25,9 @@
   --color-error: #E5484D;
   --color-error-soft: #FCE7E7;
 
+  --color-overdue: #C2543D;
+  --color-overdue-soft: #FBEAE3;
+
   /* Priority accents */
   --color-priority-low: #6C81F7;
   --color-priority-medium: #E8930E;

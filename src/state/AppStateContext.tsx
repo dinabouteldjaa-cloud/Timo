@@ -367,6 +367,54 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     async (id: string) => {
       const current = tasks.find((task) => task.id === id);
       if (!current) return;
+
+      // A still-recurring series parent has no meaningful "complete the
+      // whole series" action — completion is always per-occurrence (see
+      // task_occurrence_completions / src/lib/occurrences.ts). Any
+      // caller that reaches toggleTask with a recurring series parent's
+      // id (e.g. the Tasks page's "All" tab, which shows the series
+      // parent as its own defining row with no specific date context)
+      // is redirected here to TODAY's occurrence specifically —
+      // mirroring how Today/Plan My Day already treat "today" as the
+      // relevant occurrence for a series when no more specific date is
+      // given. This function must NEVER write status onto a recurring
+      // parent's own row; occurrence rows that already know their exact
+      // date (Today/Tasks' Today&Upcoming filters/Calendar) call
+      // setTaskOccurrenceCompletion directly with that date instead of
+      // going through toggleTask at all.
+      if (current.recurrenceType !== 'none') {
+        if (!userId) return;
+        const todayISO = toISODate(new Date());
+        const key = `${id}::${todayISO}`;
+        const wasCompleted = taskOccurrenceCompletions.has(key);
+        const nextCompleted = !wasCompleted;
+
+        setTaskOccurrenceCompletions((prev) => {
+          const next = new Set(prev);
+          if (nextCompleted) next.add(key);
+          else next.delete(key);
+          return next;
+        });
+
+        try {
+          if (nextCompleted) {
+            await tasksApi.completeTaskOccurrence(userId, id, todayISO);
+          } else {
+            await tasksApi.uncompleteTaskOccurrence(id, todayISO);
+          }
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error('[AppState] toggleTask (recurring occurrence) failed', err);
+          setTaskOccurrenceCompletions((prev) => {
+            const next = new Set(prev);
+            if (wasCompleted) next.add(key);
+            else next.delete(key);
+            return next;
+          });
+        }
+        return;
+      }
+
       const nextStatus = current.status === 'completed' ? 'todo' : 'completed';
 
       // Optimistic update so checkboxes feel instant.
@@ -387,7 +435,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         setTasksError(err instanceof Error ? err.message : 'Could not update task.');
       }
     },
-    [tasks],
+    [tasks, userId, taskOccurrenceCompletions],
   );
 
   const deleteTask = useCallback(
@@ -493,7 +541,20 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       if (!userId) throw new Error('Not signed in.');
       try {
         const created = await tasksApi.createTaskOccurrenceOverride(userId, seriesId, occurrenceDate, input);
-        setTasks((prev) => [created, ...prev]);
+        // createTaskOccurrenceOverride can return either a genuinely new
+        // row (first edit of this occurrence) or an UPDATE of an
+        // already-existing override (editing the same occurrence again)
+        // — in the second case `created.id` already exists somewhere in
+        // `prev`. Blindly prepending would leave that stale copy in the
+        // array alongside the fresh one, and since occurrence resolution
+        // (see expandTaskOccurrences) keys a lookup Map by
+        // recurrence_parent_id + occurrence_date via a plain iteration
+        // order, whichever duplicate is processed last can silently win
+        // — occasionally surfacing the stale, pre-edit values. Filtering
+        // out any existing entry with the same id before prepending
+        // guarantees exactly one entry per id, matching the same
+        // in-place-replace guarantee updateTask already provides.
+        setTasks((prev) => [created, ...prev.filter((task) => task.id !== created.id)]);
         await applyTaskReminder(created.id, input.reminder);
         return created;
       } catch (err) {
@@ -604,7 +665,15 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       if (!userId) throw new Error('Not signed in.');
       try {
         const created = await eventsApi.createEventOccurrenceOverride(userId, seriesId, occurrenceDate, input);
-        setEvents((prev) => [...prev, created]);
+        // createEventOccurrenceOverride can return either a genuinely
+        // new row (first edit of this occurrence) or an UPDATE of an
+        // already-existing override (editing the same occurrence again)
+        // — in the second case `created.id` already exists somewhere in
+        // `prev`. Filtering out any existing entry with the same id
+        // before adding the fresh one guarantees exactly one entry per
+        // id — the same fix already applied to saveTaskOccurrenceOverride
+        // for the identical class of bug.
+        setEvents((prev) => [...prev.filter((event) => event.id !== created.id), created]);
         await applyEventReminder(created.id, input.reminder);
         return created;
       } catch (err) {

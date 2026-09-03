@@ -16,6 +16,26 @@ export function formatFriendlyDate(locale: Locale, date: Date = new Date()) {
   }).format(date);
 }
 
+/**
+ * A short, locale-aware label for a date beyond today — "Tomorrow" (or
+ * the caller's localized equivalent) for the very next day, otherwise a
+ * short date like "Sep 5" (or the French-formatted equivalent, e.g. "5
+ * sept.", via Intl.DateTimeFormat). Used by Tasks > Upcoming, where the
+ * date isn't otherwise implied by which list a row is in.
+ */
+export function formatUpcomingDateLabel(
+  locale: Locale,
+  dateISO: string,
+  todayISO: string,
+  tomorrowLabel: string,
+): string {
+  if (dateISO === addDays(todayISO, 1)) return tomorrowLabel;
+  return new Intl.DateTimeFormat(locale === 'fr' ? 'fr-FR' : 'en-US', {
+    month: 'short',
+    day: 'numeric',
+  }).format(parseISODate(dateISO));
+}
+
 /** Parses a 'YYYY-MM-DD' string as a local date (avoids UTC offset surprises). */
 export function parseISODate(iso: string): Date {
   const [y, m, d] = iso.split('-').map(Number);
