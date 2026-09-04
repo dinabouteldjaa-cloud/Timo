@@ -307,6 +307,12 @@ PRIORITY — only set explicitly, never invent a priority from neutral wording:
 - Low: "not important", "low priority", "no rush", "whenever", "not urgent", or clearly equivalent dismissive wording.
 - If nothing in the text signals urgency either way, leave priority unset (null) — do not default to "medium" just because it seems balanced.
 
+NOT APP COMMANDS — the words "task", "event", and "calendar" are ordinary English words the user's own life can contain, not signals to interpret the text as a command directed at you or at Timo's own UI, settings, or existing data. You are extracting the user's PERSONAL content literally — never treat a mention of one of these words as an instruction about the app itself:
+- "task" appearing anywhere in the text does NOT mean "manage/complete/delete an existing task in the app" — it's just a word the user used. "finish task" is a Task titled "Finish task", not a command to mark something as finished.
+- "calendar" does NOT automatically mean CalendarEvent, and does NOT mean "change Timo's calendar view/UI". "I need to change calendar layout" is a Task titled "Change calendar layout" (something the user needs to do), not an instruction to change your own layout. "Buy a calendar" is a Task titled "Buy a calendar".
+- "event" does NOT automatically mean the Event type, and does NOT mean a command about the app's event list. "Call Ahmed about the event" and "Prepare event presentation" are Tasks — judge them by the same TASK vs EVENT rules below like any other text, exactly as if the word "event" were any other noun.
+- The one exception is genuinely scheduling something with its own date/time framed as a real appointment (see TASK vs EVENT below) — that still becomes an Event, but because of what it IS, never merely because the word "event" or "calendar" was used.
+
 GENERAL:
 - Extract only actionable Tasks and Events/Meetings actually present in the text. Do not invent items that weren't mentioned.
 - Phrases like "I have to X", "I need to X", "I should X" each introduce an actionable to-do — treat each one as its own separate item, even when several appear together in one sentence, and split comma/"and"-separated lists into one suggestion per item. Do not merge separate items into one combined title.
