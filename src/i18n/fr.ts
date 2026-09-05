@@ -1,6 +1,10 @@
 import type { Strings } from './en';
 
 const fr: Strings = {
+  weekdays: {
+    short: ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'],
+    full: ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'],
+  },
   nav: {
     today: "Aujourd'hui",
     tasks: 'Tâches',
@@ -31,6 +35,10 @@ const fr: Strings = {
     quickAdd: 'Ajouter rapidement une tâche…',
     noTasksToday: 'Rien de prévu pour l’instant',
     noTasksTodaySubtitle: 'Ajoutez une tâche ou laissez Timo planifier votre journée.',
+  },
+  profile: {
+    preferences: 'Préférences',
+    firstDayOfWeek: 'Premier jour de la semaine',
   },
   tasks: {
     title: 'Tâches',

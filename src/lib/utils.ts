@@ -1,5 +1,6 @@
 import type { Strings } from '../i18n/en';
 import type { Locale } from '../i18n/LocaleContext';
+import { getWeekStartOffset } from './weekUtils';
 
 export function getGreetingKey(date: Date = new Date()): 'greetingMorning' | 'greetingAfternoon' | 'greetingEvening' {
   const hour = date.getHours();
@@ -80,15 +81,15 @@ export function addDays(iso: string, days: number): string {
   return toISODate(date);
 }
 
-/** Returns the ISO dates (Mon–Sun) of the week containing the given date. */
-export function getWeekDates(iso: string): string[] {
+/** Returns the ISO dates of the week containing the given date, starting on `firstDayOfWeek` (0=Sun..6=Sat, defaults to Monday). */
+export function getWeekDates(iso: string, firstDayOfWeek: number = 1): string[] {
   const date = parseISODate(iso);
-  const offset = (date.getDay() + 6) % 7; // Monday-first
-  const monday = new Date(date);
-  monday.setDate(date.getDate() - offset);
+  const offset = getWeekStartOffset(date, firstDayOfWeek);
+  const weekStart = new Date(date);
+  weekStart.setDate(date.getDate() - offset);
   return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
+    const d = new Date(weekStart);
+    d.setDate(weekStart.getDate() + i);
     return toISODate(d);
   });
 }

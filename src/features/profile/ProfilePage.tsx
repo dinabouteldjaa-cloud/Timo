@@ -6,6 +6,8 @@ import Button from '../../components/ui/Button';
 import TimoMascot from '../../components/ui/TimoMascot';
 import Badge from '../../components/ui/Badge';
 import { useAuth } from '../../state/AuthContext';
+import { useLocale } from '../../i18n/LocaleContext';
+import { useAppState } from '../../state/AppStateContext';
 import {
   getPushSupportState,
   isEnabledOnThisDevice,
@@ -15,6 +17,8 @@ import {
 } from '../../lib/pushNotifications';
 import './ProfilePage.css';
 
+const WEEKDAY_NUMBERS = [0, 1, 2, 3, 4, 5, 6];
+
 const rows = [
   { label: 'Language', hint: 'English' },
   { label: 'About Timo', hint: 'v0.1' },
@@ -23,11 +27,14 @@ const rows = [
 export default function ProfilePage() {
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
+  const { t } = useLocale();
+  const { firstDayOfWeek, updateFirstDayOfWeek } = useAppState();
 
   const [support, setSupport] = useState<PushSupportState>('unsupported');
   const [enabledHere, setEnabledHere] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notifError, setNotifError] = useState<string | null>(null);
+  const [savingFirstDay, setSavingFirstDay] = useState(false);
 
   useEffect(() => {
     setSupport(getPushSupportState());
@@ -40,6 +47,24 @@ export default function ProfilePage() {
   async function handleLogout() {
     await signOut();
     navigate('/login', { replace: true });
+  }
+
+  /**
+   * Persists immediately on selection, matching the spec — updateFirstDayOfWeek
+   * already handles optimistic update + rollback on failure internally
+   * (see AppStateContext), so there's nothing extra to do here on error
+   * beyond not double-submitting while a save is in flight.
+   */
+  async function handleSelectFirstDay(day: number) {
+    if (day === firstDayOfWeek || savingFirstDay) return;
+    setSavingFirstDay(true);
+    try {
+      await updateFirstDayOfWeek(day);
+    } catch {
+      // Already logged and rolled back by AppStateContext.
+    } finally {
+      setSavingFirstDay(false);
+    }
   }
 
   async function handleEnableNotifications() {
@@ -121,6 +146,28 @@ export default function ProfilePage() {
             </div>
           ))}
         </Card>
+
+        <div>
+          <p className="profile-section-label">{t.profile.preferences}</p>
+          <Card padding="none">
+            <div className="profile-row profile-row--column">
+              <span className="profile-row__label">{t.profile.firstDayOfWeek}</span>
+              <div className="profile-weekday-row scroll-row">
+                {WEEKDAY_NUMBERS.map((day) => (
+                  <button
+                    key={day}
+                    type="button"
+                    className={`profile-weekday-chip ${firstDayOfWeek === day ? 'profile-weekday-chip--active' : ''}`}
+                    onClick={() => handleSelectFirstDay(day)}
+                    disabled={savingFirstDay}
+                  >
+                    {t.weekdays.full[day]}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </Card>
+        </div>
 
         <div>
           <p className="profile-section-label">Account</p>

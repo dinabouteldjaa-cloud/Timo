@@ -1,3 +1,6 @@
+import { useAppState } from '../../state/AppStateContext';
+import { useLocale } from '../../i18n/LocaleContext';
+import { getOrderedWeekdays } from '../../lib/weekUtils';
 import type { RecurrenceType } from '../../types/task';
 import './RecurrencePicker.css';
 
@@ -15,16 +18,6 @@ export const emptyRecurrenceValue = (): RecurrencePickerValue => ({
   endDate: '',
 });
 
-const WEEKDAYS: { key: number; label: string }[] = [
-  { key: 0, label: 'Sun' },
-  { key: 1, label: 'Mon' },
-  { key: 2, label: 'Tue' },
-  { key: 3, label: 'Wed' },
-  { key: 4, label: 'Thu' },
-  { key: 5, label: 'Fri' },
-  { key: 6, label: 'Sat' },
-];
-
 const TYPE_OPTIONS: { key: RecurrenceType; label: string }[] = [
   { key: 'none', label: 'Does not repeat' },
   { key: 'daily', label: 'Daily' },
@@ -40,6 +33,14 @@ interface RecurrencePickerProps {
 }
 
 export default function RecurrencePicker({ value, onChange, error }: RecurrencePickerProps) {
+  const { firstDayOfWeek } = useAppState();
+  const { t } = useLocale();
+  // DISPLAY order only — the stored day numbers (0=Sun..6=Sat) and
+  // toggleDay's own logic below are completely unaffected by this;
+  // reordering which button appears first never changes what tapping it
+  // stores. See src/lib/weekUtils.ts.
+  const orderedWeekdays = getOrderedWeekdays(firstDayOfWeek);
+
   function toggleDay(day: number) {
     const has = value.daysOfWeek.includes(day);
     onChange({
@@ -66,14 +67,14 @@ export default function RecurrencePicker({ value, onChange, error }: RecurrenceP
 
       {value.type === 'custom' && (
         <div className="recurrence-picker__weekdays">
-          {WEEKDAYS.map((day) => (
+          {orderedWeekdays.map((day) => (
             <button
-              key={day.key}
+              key={day}
               type="button"
-              className={`recurrence-picker__day ${value.daysOfWeek.includes(day.key) ? 'recurrence-picker__day--active' : ''}`}
-              onClick={() => toggleDay(day.key)}
+              className={`recurrence-picker__day ${value.daysOfWeek.includes(day) ? 'recurrence-picker__day--active' : ''}`}
+              onClick={() => toggleDay(day)}
             >
-              {day.label}
+              {t.weekdays.short[day]}
             </button>
           ))}
         </div>

@@ -24,6 +24,7 @@ import * as tasksApi from '../lib/tasksApi';
 import * as eventsApi from '../lib/calendarEventsApi';
 import * as remindersApi from '../lib/remindersApi';
 import * as focusSessionsApi from '../lib/focusSessionsApi';
+import * as profilesApi from '../lib/profilesApi';
 import type { ReminderSchedule } from '../lib/remindersApi';
 
 // ---------------------------------------------------------------------------
@@ -96,6 +97,12 @@ interface TodayFocusSummary {
 }
 
 interface AppStateValue {
+  // First day of week (0=Sun..6=Sat) — DISPLAY ORDER ONLY, see
+  // src/lib/weekUtils.ts. Defaults to 1 (Monday) if the profile row
+  // can't be read or the field is somehow missing/out of range.
+  firstDayOfWeek: number;
+  updateFirstDayOfWeek: (value: number) => Promise<void>;
+
   tasks: Task[];
   tasksLoading: boolean;
   tasksError: string | null;
@@ -180,6 +187,58 @@ function toMinutes(time: string): number {
 export function AppStateProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const userId = user?.id ?? null;
+
+  // --- First day of week preference (DISPLAY ORDER ONLY — see
+  // src/lib/weekUtils.ts) ---------------------------------------------
+  const DEFAULT_FIRST_DAY_OF_WEEK = 1; // Monday — matches Calendar's own prior hardcoded default exactly
+  const [firstDayOfWeek, setFirstDayOfWeek] = useState<number>(DEFAULT_FIRST_DAY_OF_WEEK);
+
+  useEffect(() => {
+    if (!userId) {
+      setFirstDayOfWeek(DEFAULT_FIRST_DAY_OF_WEEK);
+      return;
+    }
+    let cancelled = false;
+    profilesApi
+      .fetchProfile(userId)
+      .then((profile) => {
+        if (cancelled) return;
+        const value = profile.firstDayOfWeek;
+        // Defensive: fall back to Monday if the value is somehow missing
+        // or outside the valid 0-6 range, rather than passing a bad
+        // number through to grid/offset math elsewhere.
+        setFirstDayOfWeek(
+          typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 6
+            ? value
+            : DEFAULT_FIRST_DAY_OF_WEEK,
+        );
+      })
+      .catch((err: Error) => {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] fetchProfile failed, falling back to Monday', err);
+        if (!cancelled) setFirstDayOfWeek(DEFAULT_FIRST_DAY_OF_WEEK);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  const updateFirstDayOfWeek = useCallback(
+    async (value: number) => {
+      if (!userId) return;
+      const previous = firstDayOfWeek;
+      setFirstDayOfWeek(value); // optimistic — this is a low-stakes, instantly-visible preference
+      try {
+        await profilesApi.updateFirstDayOfWeek(userId, value);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] updateFirstDayOfWeek failed', err);
+        setFirstDayOfWeek(previous);
+        throw err;
+      }
+    },
+    [userId, firstDayOfWeek],
+  );
 
   // --- Reminders (loaded once per session; mutated only via tasks/events) --
   const [reminders, setReminders] = useState<Reminder[]>([]);
@@ -1114,6 +1173,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AppStateValue>(
     () => ({
+      firstDayOfWeek,
+      updateFirstDayOfWeek,
       tasks,
       tasksLoading,
       tasksError,
@@ -1160,6 +1221,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       endFocus,
     }),
     [
+      firstDayOfWeek,
+      updateFirstDayOfWeek,
       tasks,
       tasksLoading,
       tasksError,

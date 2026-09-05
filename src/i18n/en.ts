@@ -1,4 +1,13 @@
 const en = {
+  weekdays: {
+    // Index 0=Sunday..6=Saturday — same fixed numbering used everywhere
+    // else in the app (recurrenceDaysOfWeek, the recurrence engine).
+    // Display ORDER is handled separately by src/lib/weekUtils.ts; these
+    // are just the labels themselves, kept compact for mobile per the
+    // Calendar/RecurrencePicker usage.
+    short: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+    full: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+  },
   nav: {
     today: 'Today',
     tasks: 'Tasks',
@@ -29,6 +38,10 @@ const en = {
     quickAdd: 'Quick add a task…',
     noTasksToday: 'Nothing scheduled yet',
     noTasksTodaySubtitle: 'Add a task or let Timo plan your day.',
+  },
+  profile: {
+    preferences: 'Preferences',
+    firstDayOfWeek: 'First day of week',
   },
   tasks: {
     title: 'Tasks',

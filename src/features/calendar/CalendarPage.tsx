@@ -7,6 +7,7 @@ import IconButton from '../../components/ui/IconButton';
 import { useLocale } from '../../i18n/LocaleContext';
 import { useAppState, type NewEventInput, type NewTaskInput } from '../../state/AppStateContext';
 import { addDays, getWeekDates, parseISODate, toISODate } from '../../lib/utils';
+import { getOrderedWeekdays, getWeekStartOffset } from '../../lib/weekUtils';
 import { expandTaskOccurrences, expandEventOccurrences, type TaskOccurrence, type EventOccurrence } from '../../lib/occurrences';
 import { describeRecurrence } from '../../lib/recurrence';
 import type { CalendarEvent, Task } from '../../types/task';
@@ -27,11 +28,11 @@ type AgendaItem =
 
 const TODAY_ISO = toISODate(new Date());
 
-function buildMonthGrid(reference: Date) {
+function buildMonthGrid(reference: Date, firstDayOfWeek: number) {
   const year = reference.getFullYear();
   const month = reference.getMonth();
   const firstDay = new Date(year, month, 1);
-  const startOffset = (firstDay.getDay() + 6) % 7; // Monday-first grid
+  const startOffset = getWeekStartOffset(firstDay, firstDayOfWeek);
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
   const cells: (number | null)[] = Array(startOffset).fill(null);
@@ -73,6 +74,7 @@ export default function CalendarPage() {
   const { t } = useLocale();
   const navigate = useNavigate();
   const {
+    firstDayOfWeek,
     events,
     eventsLoading,
     eventsError,
@@ -109,8 +111,8 @@ export default function CalendarPage() {
   const [detailsTaskOccurrence, setDetailsTaskOccurrence] = useState<TaskOccurrence | null>(null);
 
   const referenceMonth = parseISODate(selectedDate);
-  const cells = buildMonthGrid(referenceMonth);
-  const weekDates = getWeekDates(selectedDate);
+  const cells = buildMonthGrid(referenceMonth, firstDayOfWeek);
+  const weekDates = getWeekDates(selectedDate, firstDayOfWeek);
 
   // The calendar month currently on screen — used to expand recurring
   // series into concrete dates for dot indicators and the agenda. Padded
@@ -371,9 +373,9 @@ export default function CalendarPage() {
               </IconButton>
             </div>
             <div className="calendar-grid calendar-grid--headers">
-              {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
-                <span key={i} className="calendar-grid__weekday">
-                  {d}
+              {getOrderedWeekdays(firstDayOfWeek).map((day) => (
+                <span key={day} className="calendar-grid__weekday">
+                  {t.weekdays.short[day]}
                 </span>
               ))}
             </div>
@@ -421,9 +423,7 @@ export default function CalendarPage() {
                     }`}
                     onClick={() => setSelectedDate(iso)}
                   >
-                    <span className="calendar-week-day__label">
-                      {new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(date)}
-                    </span>
+                    <span className="calendar-week-day__label">{t.weekdays.short[date.getDay()]}</span>
                     <span className="calendar-week-day__num">{date.getDate()}</span>
                     {hasEvent && <span className="calendar-cell__dot" />}
                   </button>
