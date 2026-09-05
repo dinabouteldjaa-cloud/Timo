@@ -103,6 +103,9 @@ interface AppStateValue {
   updateTask: (id: string, input: NewTaskInput) => Promise<void>;
   toggleTask: (id: string) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
+  archiveTask: (id: string) => Promise<void>;
+  unarchiveTask: (id: string) => Promise<void>;
+  archiveTaskOccurrenceOverride: (seriesId: string, occurrenceDate: string, effectiveFields: NewTaskInput) => Promise<Task>;
   setTaskSchedule: (
     id: string,
     schedule: { date: string; startTime: string; endTime: string } | null,
@@ -485,6 +488,84 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       }
     },
     [tasks, reminders],
+  );
+
+  // --- Archiving (see supabase/migrations/0012_task_archiving.sql) -------
+  // Throws on failure (never silently swallowed) so bulk callers in
+  // TasksPage can use Promise.allSettled and know exactly which items
+  // failed, per the "no partial/inconsistent state" requirement.
+
+  const archiveTask = useCallback(
+    async (id: string) => {
+      const previousTasks = tasks;
+      setTasks((prev) =>
+        prev.map((task) => (task.id === id ? { ...task, archivedAt: new Date().toISOString() } : task)),
+      );
+      try {
+        const updated = await tasksApi.archiveTask(id);
+        setTasks((prev) => prev.map((task) => (task.id === id ? updated : task)));
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] archiveTask failed', err);
+        setTasks(previousTasks);
+        setTasksError(err instanceof Error ? err.message : 'Could not archive this task.');
+        throw err;
+      }
+    },
+    [tasks],
+  );
+
+  const unarchiveTask = useCallback(
+    async (id: string) => {
+      const previousTasks = tasks;
+      setTasks((prev) => prev.map((task) => (task.id === id ? { ...task, archivedAt: undefined } : task)));
+      try {
+        const updated = await tasksApi.unarchiveTask(id);
+        setTasks((prev) => prev.map((task) => (task.id === id ? updated : task)));
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] unarchiveTask failed', err);
+        setTasks(previousTasks);
+        setTasksError(err instanceof Error ? err.message : 'Could not restore this task.');
+        throw err;
+      }
+    },
+    [tasks],
+  );
+
+  /**
+   * Archives ONE occurrence of a recurring series — never the series
+   * itself. Reuses tasksApi.archiveTaskOccurrenceOverride, which
+   * materializes-and-archives (or archives an existing override) in a
+   * single write — see that function's own comment for why this must not
+   * be split into a separate create-then-archive pair of calls.
+   */
+  const archiveTaskOccurrenceOverride = useCallback(
+    async (seriesId: string, occurrenceDate: string, effectiveFields: NewTaskInput) => {
+      if (!userId) throw new Error('Not signed in.');
+      const previousTasks = tasks;
+      try {
+        const archived = await tasksApi.archiveTaskOccurrenceOverride(
+          userId,
+          seriesId,
+          occurrenceDate,
+          effectiveFields,
+        );
+        setTasks((prev) => {
+          const existingIndex = prev.findIndex((task) => task.id === archived.id);
+          if (existingIndex === -1) return [archived, ...prev];
+          return prev.map((task) => (task.id === archived.id ? archived : task));
+        });
+        return archived;
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] archiveTaskOccurrenceOverride failed', err);
+        setTasks(previousTasks);
+        setTasksError(err instanceof Error ? err.message : 'Could not archive this occurrence.');
+        throw err;
+      }
+    },
+    [userId, tasks],
   );
 
   const setTaskSchedule = useCallback(
@@ -990,6 +1071,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       updateTask,
       toggleTask,
       deleteTask,
+      archiveTask,
+      unarchiveTask,
+      archiveTaskOccurrenceOverride,
       setTaskSchedule,
       taskOccurrenceCompletions,
       taskOccurrenceSkips,
@@ -1032,6 +1116,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       updateTask,
       toggleTask,
       deleteTask,
+      archiveTask,
+      unarchiveTask,
+      archiveTaskOccurrenceOverride,
       setTaskSchedule,
       taskOccurrenceCompletions,
       taskOccurrenceSkips,

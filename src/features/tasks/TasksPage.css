@@ -106,3 +106,117 @@
   color: var(--color-primary);
   cursor: pointer;
 }
+
+/* Selection toolbar — sits above the filter chips. Normal mode shows two
+   quiet text links; selection mode swaps in Cancel / count / Select all /
+   Done, keeping the same compact single-row footprint so entering
+   selection mode doesn't otherwise disturb the page layout. */
+.tasks-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 20px;
+}
+
+.tasks-toolbar__link {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-primary);
+  cursor: pointer;
+}
+
+.tasks-toolbar__link--done {
+  margin-left: auto;
+}
+
+.tasks-toolbar__count {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text);
+  margin-right: auto;
+}
+
+/* Bulk action bar — fixed just above the bottom nav, matching the exact
+   same safe-area-aware positioning already used by .tasks-fab, so it
+   never overlaps the nav on any device. */
+.tasks-bulk-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: var(--bottom-nav-height);
+  z-index: 45;
+  display: flex;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border-soft);
+  box-shadow: 0 -4px 16px rgba(15, 18, 38, 0.06);
+  max-width: var(--max-content-width);
+  margin: 0 auto;
+}
+
+.tasks-bulk-bar__action {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  border: none;
+  background: none;
+  padding: var(--space-2) var(--space-1);
+  border-radius: var(--radius-sm);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-primary);
+  cursor: pointer;
+}
+
+.tasks-bulk-bar__action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.tasks-bulk-bar__action--danger {
+  color: var(--color-overdue);
+}
+
+.tasks-move-sheet {
+  width: 100%;
+  max-width: var(--max-content-width);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.tasks-move-sheet__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-text);
+  text-align: center;
+}
+
+.tasks-move-sheet__input {
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.tasks-move-sheet__input:focus {
+  border-color: var(--color-primary);
+  outline: none;
+}
+
+.tasks-move-sheet__warning {
+  margin: -8px 0 0;
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+  text-align: center;
+}

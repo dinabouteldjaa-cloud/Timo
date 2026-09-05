@@ -63,6 +63,12 @@ export function expandTaskOccurrences(
     // slot (handled via overrideByKey above) — never as their own
     // separate standalone occurrence too.
     if (task.recurrenceParentId) continue;
+    // Archived (see supabase/migrations/0012_task_archiving.sql): an
+    // archived ordinary task, or an archived recurring SERIES PARENT,
+    // must disappear from every active view entirely. This one guard
+    // covers Today/Overdue/Upcoming/All (TasksPage), Calendar, and Plan
+    // My Day, since all of them consume this same function.
+    if (task.archivedAt) continue;
 
     const rule = toRule(task);
 
@@ -87,6 +93,12 @@ export function expandTaskOccurrences(
       if (skips.has(key)) continue;
 
       const override = overrideByKey.get(key);
+      // An individually archived occurrence override must disappear
+      // entirely for this date — NOT fall back to showing the virtual
+      // (series-computed) occurrence instead, which would silently
+      // resurrect what the user just archived.
+      if (override?.archivedAt) continue;
+
       const effective = override ?? task;
       // Completion for a recurring occurrence — whether resolved through
       // an override or computed virtually — always comes from
@@ -217,8 +229,16 @@ export function resolveCompletedTaskOccurrences(
     // with their series (see 0011_recurring_tasks_events.sql), but skip
     // defensively rather than rendering a broken row.
     if (!seriesParent) continue;
+    // Archived: a completed occurrence whose series (or whose own
+    // override) has since been archived must disappear from Completed
+    // history too, per the archive feature's requirement that archived
+    // items vanish from every active/normal view.
+    if (seriesParent.archivedAt) continue;
 
-    const effective = overrideByKey.get(key) ?? seriesParent;
+    const override = overrideByKey.get(key);
+    if (override?.archivedAt) continue;
+
+    const effective = override ?? seriesParent;
 
     results.push({
       virtualId: key,

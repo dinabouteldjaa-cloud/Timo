@@ -25,6 +25,12 @@ interface TaskRowProps {
   dateLabel?: string;
   /** Shows a small repeat icon — true when this row represents an occurrence of a recurring series (including an edited "This occurrence" override), not just when the row's own recurrenceType is set. */
   isRecurring?: boolean;
+  /** When true, the row/checkbox toggles selection instead of opening details/completing, and swipe is disabled by the caller omitting onEditRequest/onDeleteRequest. */
+  selectionMode?: boolean;
+  /** Only meaningful when selectionMode is true. */
+  selected?: boolean;
+  /** Called instead of onOpen/onToggle when selectionMode is true. */
+  onSelectToggle?: () => void;
 }
 
 export default function TaskRow({
@@ -37,6 +43,9 @@ export default function TaskRow({
   overdue,
   dateLabel,
   isRecurring,
+  selectionMode,
+  selected,
+  onSelectToggle,
 }: TaskRowProps) {
   const { t } = useLocale();
   const done = task.status === 'completed';
@@ -149,6 +158,10 @@ export default function TaskRow({
   metaParts.push(t.category[task.category]);
 
   function handleOpen() {
+    if (selectionMode) {
+      onSelectToggle?.();
+      return;
+    }
     if (isSwipeOpen) {
       // A tap while swipe actions are revealed closes them first —
       // matches native swipe-action list conventions — rather than also
@@ -235,7 +248,7 @@ export default function TaskRow({
         )}
 
         <div
-          className={`task-row ${done ? 'task-row--done' : ''} ${onOpen ? 'task-row--clickable' : ''} ${overdue ? 'task-row--overdue' : ''}`}
+          className={`task-row ${done ? 'task-row--done' : ''} ${onOpen ? 'task-row--clickable' : ''} ${overdue ? 'task-row--overdue' : ''} ${selectionMode && selected ? 'task-row--selected' : ''}`}
           style={{ transform: `translateX(${dragX}px)`, transition: dragging ? 'none' : 'transform 0.2s ease' }}
           onClick={handleOpen}
           onKeyDown={handleKeyDown}
@@ -256,7 +269,11 @@ export default function TaskRow({
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => e.stopPropagation()}
           >
-            <Checkbox checked={done} onChange={() => onToggle?.(task.id)} aria-label={task.title} />
+            <Checkbox
+              checked={selectionMode ? Boolean(selected) : done}
+              onChange={() => (selectionMode ? onSelectToggle?.() : onToggle?.(task.id))}
+              aria-label={task.title}
+            />
           </div>
           <div className="task-row__body">
             <p className="task-row__title">

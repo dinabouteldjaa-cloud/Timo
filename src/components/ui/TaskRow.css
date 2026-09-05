@@ -42,6 +42,10 @@
   background: var(--color-overdue);
 }
 
+.task-row--selected {
+  background: var(--color-primary-soft);
+}
+
 .task-row__checkbox-wrap {
   display: flex;
 }

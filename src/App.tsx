@@ -4,6 +4,7 @@ import ProtectedRoute from './components/layout/ProtectedRoute';
 import RedirectIfAuthed from './components/layout/RedirectIfAuthed';
 import TodayPage from './features/today/TodayPage';
 import TasksPage from './features/tasks/TasksPage';
+import ArchivedTasksPage from './features/tasks/ArchivedTasksPage';
 import CalendarPage from './features/calendar/CalendarPage';
 import FocusPage from './features/focus/FocusPage';
 import BrainDumpPage from './features/braindump/BrainDumpPage';
@@ -56,6 +57,7 @@ export default function App() {
                       <Routes>
                         <Route path="/" element={<TodayPage />} />
                         <Route path="/tasks" element={<TasksPage />} />
+                        <Route path="/tasks/archived" element={<ArchivedTasksPage />} />
                         <Route path="/calendar" element={<CalendarPage />} />
                         <Route path="/focus" element={<FocusPage />} />
                         <Route path="/brain-dump" element={<BrainDumpPage />} />

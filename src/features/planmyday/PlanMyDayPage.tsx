@@ -85,6 +85,7 @@ export default function PlanMyDayPage() {
     () =>
       tasks.filter((task) => {
         if (task.status === 'completed') return false;
+        if (task.archivedAt) return false;
         if (task.recurrenceParentId) return task.recurrenceOccurrenceDate === TODAY_ISO;
         if (task.recurrenceType !== 'none') {
           if (!isDateAnOccurrence(task, TODAY_ISO)) return false;

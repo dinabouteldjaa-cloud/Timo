@@ -45,6 +45,12 @@ export interface Task {
   // sort the Completed history by actual completion time rather than
   // due date.
   completedAt?: string;
+  // When the task (or occurrence override) was archived (set by
+  // tasksApi.archiveTask / archiveTaskOccurrenceOverride). NULL/undefined
+  // = active. Archiving is orthogonal to status — an archived task can
+  // have been complete or not before archiving — and is fully restorable
+  // by clearing this field. See supabase/migrations/0012_task_archiving.sql.
+  archivedAt?: string;
 }
 
 export type CalendarEventType = 'event' | 'meeting';

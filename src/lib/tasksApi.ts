@@ -29,6 +29,7 @@ interface TaskRow {
   recurrence_parent_id: string | null;
   recurrence_occurrence_date: string | null;
   completed_at: string | null;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -54,6 +55,7 @@ function rowToTask(row: TaskRow): Task {
     recurrenceParentId: row.recurrence_parent_id ?? undefined,
     recurrenceOccurrenceDate: row.recurrence_occurrence_date ?? undefined,
     completedAt: row.completed_at ?? undefined,
+    archivedAt: row.archived_at ?? undefined,
   };
 }
 
@@ -150,6 +152,101 @@ export async function setTaskStatus(taskId: string, status: TaskStatus): Promise
 export async function deleteTask(taskId: string): Promise<void> {
   const { error } = await supabase.from('tasks').delete().eq('id', taskId);
   if (error) throw toSupabaseError('Could not delete task', error);
+}
+
+// ---------------------------------------------------------------------------
+// Archiving (see supabase/migrations/0012_task_archiving.sql)
+// ---------------------------------------------------------------------------
+
+/** Archives a normal task OR an existing occurrence override row — both are ordinary rows in `tasks`. */
+export async function archiveTask(taskId: string): Promise<Task> {
+  const { data, error } = await supabase
+    .from('tasks')
+    .update({ archived_at: new Date().toISOString() })
+    .eq('id', taskId)
+    .select('*')
+    .single();
+
+  if (error) throw toSupabaseError('Could not archive this task', error);
+  return rowToTask(data as TaskRow);
+}
+
+/** Restores an archived task or override — clearing archived_at never creates a new row, so this can never produce a duplicate. */
+export async function unarchiveTask(taskId: string): Promise<Task> {
+  const { data, error } = await supabase
+    .from('tasks')
+    .update({ archived_at: null })
+    .eq('id', taskId)
+    .select('*')
+    .single();
+
+  if (error) throw toSupabaseError('Could not restore this task', error);
+  return rowToTask(data as TaskRow);
+}
+
+/**
+ * Archives ONE occurrence of a recurring series, never the series itself.
+ * If the occurrence is still virtual (no override yet), this materializes
+ * one — copying the given effective fields — WITH archived_at already set
+ * in the SAME insert, rather than creating the override and archiving it
+ * as two separate calls. That matters: a two-step create-then-archive
+ * would leave a brief window where a real, unarchived, visible override
+ * exists if the second step failed, meaning the user could end up with
+ * the occurrence still showing (now via the override) even though the
+ * archive action reported success. A single write has no such window.
+ * If an override already exists for this date, it's archived in place —
+ * never creating a second row.
+ */
+export async function archiveTaskOccurrenceOverride(
+  userId: string,
+  seriesId: string,
+  occurrenceDate: string,
+  effectiveFields: TaskInput,
+): Promise<Task> {
+  const { data: existing, error: findError } = await supabase
+    .from('tasks')
+    .select('id')
+    .eq('recurrence_parent_id', seriesId)
+    .eq('recurrence_occurrence_date', occurrenceDate)
+    .maybeSingle();
+
+  if (findError) throw toSupabaseError('Could not archive this occurrence', findError);
+
+  const archivedAt = new Date().toISOString();
+
+  if (existing) {
+    const { data, error } = await supabase
+      .from('tasks')
+      .update({ archived_at: archivedAt })
+      .eq('id', existing.id)
+      .select('*')
+      .single();
+
+    if (error) throw toSupabaseError('Could not archive this occurrence', error);
+    return rowToTask(data as TaskRow);
+  }
+
+  const { data, error } = await supabase
+    .from('tasks')
+    .insert({
+      user_id: userId,
+      title: effectiveFields.title.trim(),
+      description: effectiveFields.description?.trim() || null,
+      priority: effectiveFields.priority,
+      category: effectiveFields.category,
+      due_date: effectiveFields.dueDate || null,
+      due_time: effectiveFields.dueTime || null,
+      estimated_duration_minutes: effectiveFields.estimatedMinutes ?? null,
+      recurrence_type: 'none',
+      recurrence_parent_id: seriesId,
+      recurrence_occurrence_date: occurrenceDate,
+      archived_at: archivedAt,
+    })
+    .select('*')
+    .single();
+
+  if (error) throw toSupabaseError('Could not archive this occurrence', error);
+  return rowToTask(data as TaskRow);
 }
 
 /**

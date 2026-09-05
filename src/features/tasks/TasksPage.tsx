@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Header from '../../components/layout/Header';
 import Card from '../../components/ui/Card';
+import Button from '../../components/ui/Button';
 import TaskRow from '../../components/ui/TaskRow';
 import EmptyState from '../../components/ui/EmptyState';
 import IconButton from '../../components/ui/IconButton';
 import { useLocale, formatString } from '../../i18n/LocaleContext';
-import { useAppState } from '../../state/AppStateContext';
+import { useAppState, type NewTaskInput } from '../../state/AppStateContext';
 import { expandTaskOccurrences, resolveCompletedTaskOccurrences } from '../../lib/occurrences';
 import { describeRecurrence } from '../../lib/recurrence';
+import { computeRemindAt } from '../../lib/reminderPresets';
 import { toISODate, addDays, formatTaskRowDateLabel } from '../../lib/utils';
-import type { Task } from '../../types/task';
+import type { Reminder, Task } from '../../types/task';
 import AddTaskSheet from './AddTaskSheet';
 import TaskDetailsSheet from './TaskDetailsSheet';
 import './TasksPage.css';
@@ -64,6 +67,7 @@ function isOccurrenceOverdue(
 }
 
 export default function TasksPage() {
+  const navigate = useNavigate();
   const { t, locale } = useLocale();
   const {
     tasks,
@@ -75,6 +79,8 @@ export default function TasksPage() {
     deleteTask,
     deleteTaskOccurrence,
     saveTaskOccurrenceOverride,
+    archiveTask,
+    archiveTaskOccurrenceOverride,
     reminders,
     taskOccurrenceCompletions,
     taskOccurrenceSkips,
@@ -124,6 +130,25 @@ export default function TasksPage() {
   const [completedVisibleCount, setCompletedVisibleCount] = useState(COMPLETED_BATCH_SIZE);
   useEffect(() => {
     setCompletedVisibleCount(COMPLETED_BATCH_SIZE);
+  }, [filter]);
+
+  // --- Bulk selection mode -------------------------------------------
+  // See rowKey() below for the identity model — the same
+  // `${seriesId}::${occurrenceDate}` / plain task.id convention already
+  // used throughout this file for everything else (rendering keys,
+  // pinning, completion). Selection is cleared whenever the filter
+  // changes (so "Select all" can never silently apply to a different
+  // filter's rows) and whenever selection mode is exited.
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [moveToOpen, setMoveToOpen] = useState(false);
+  const [moveToDate, setMoveToDate] = useState('');
+
+  useEffect(() => {
+    setSelectedKeys(new Set());
   }, [filter]);
 
   // Drives "now" for overdue/date calculations below. Ticks once a
@@ -386,6 +411,255 @@ export default function TasksPage() {
     completedVisibleCount,
   ]);
 
+  // --- Selection identity ----------------------------------------------
+  // Reuses the EXACT same identity already used everywhere else in this
+  // file (React list keys, pinning, completion lookups): a recurring
+  // occurrence — virtual OR an existing override — is
+  // `${seriesId}::${occurrenceDate}`; anything else is its own task.id.
+  // "Select all" is exactly `filtered.map(rowKey)` — the literal rows
+  // already on screen for the current filter, so it can never reach
+  // into a different filter's rows or (for Completed specifically) any
+  // older item still hidden behind "View older completed".
+  function rowKey(row: FilteredRow): string {
+    return row.occurrenceDate ? `${row.seriesId}::${row.occurrenceDate}` : row.row.id;
+  }
+
+  const selectedRows = useMemo(() => {
+    const byKey = new Map(filtered.map((r) => [rowKey(r), r] as const));
+    return [...selectedKeys].map((k) => byKey.get(k)).filter((r): r is FilteredRow => Boolean(r));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, selectedKeys]);
+
+  function enterSelectionMode() {
+    setSelectionMode(true);
+    setSelectedKeys(new Set());
+    setBulkError(null);
+  }
+
+  function exitSelectionMode() {
+    setSelectionMode(false);
+    setSelectedKeys(new Set());
+    setBulkError(null);
+  }
+
+  function toggleRowSelected(row: FilteredRow) {
+    const key = rowKey(row);
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function selectAllVisible() {
+    setSelectedKeys(new Set(filtered.map(rowKey)));
+  }
+
+  // --- Bulk operations ---------------------------------------------------
+  // All three (Move to, Archive, Delete) share the same shape: resolve
+  // the current selection to real rows, run each item's operation via
+  // Promise.allSettled (parallel, not sequential — avoids stacking up N
+  // round-trips one at a time for a large selection), then report
+  // exactly which ones failed rather than pretending success. Failed
+  // items stay selected so the user can see and retry them, per the
+  // "no silent partial failure" requirement.
+
+  function taskAsMoveOrArchiveInput(task: Task, dueDateOverride?: string): NewTaskInput {
+    return {
+      title: task.title,
+      description: task.description,
+      dueDate: dueDateOverride ?? task.dueDate,
+      dueTime: task.dueTime,
+      priority: task.priority,
+      category: task.category,
+      estimatedMinutes: task.estimatedMinutes,
+      reminder: null,
+    };
+  }
+
+  /**
+   * Recomputes a relative (offset-based) reminder for a new due date,
+   * using the task's OWN due time and the SAME offset — exactly the
+   * pattern already proven in PlanMyDayPage's resolveScheduleTargetId.
+   * An absolute/custom reminder (no offsetMinutes) is passed through
+   * completely unchanged: a due-date move doesn't tell us what a fixed
+   * custom alarm time should become, so the safest behavior is to leave
+   * it exactly as it was.
+   */
+  function computeMovedReminder(
+    existingReminder: Reminder | null,
+    newDate: string,
+    dueTime: string | undefined,
+  ): { remindAt: string; offsetMinutes?: number } | null {
+    if (!existingReminder) return null;
+    if (existingReminder.offsetMinutes !== undefined && dueTime) {
+      return {
+        remindAt: computeRemindAt(newDate, dueTime, existingReminder.offsetMinutes),
+        offsetMinutes: existingReminder.offsetMinutes,
+      };
+    }
+    return { remindAt: existingReminder.remindAt, offsetMinutes: existingReminder.offsetMinutes };
+  }
+
+  /**
+   * Moves ONE selected row to `newDate`. For a recurring occurrence
+   * (virtual or an existing override) this DETACHES it rather than
+   * changing a date in place: inspection of expandTaskOccurrences/
+   * occurrenceAsTask confirmed an occurrence's displayed date always
+   * comes from its recurrence_occurrence_date SLOT, never from its own
+   * due_date field — so simply changing an override's due_date would not
+   * actually reposition it. Detaching means: remove/skip the original
+   * occurrence, then create a brand-new, fully standalone, non-recurring
+   * task at the new date (no recurrence_parent_id / recurrence_occurrence_date
+   * at all) — this can NEVER move or otherwise affect the parent series.
+   */
+  async function moveSingleRow(row: FilteredRow, newDate: string) {
+    const isRecurringOccurrence = Boolean(row.seriesId && row.occurrenceDate);
+    if (isRecurringOccurrence) {
+      const effective = row.editTask;
+      const existingReminder = reminders.find((r) => r.taskId === effective.id) ?? null;
+      const newReminder = computeMovedReminder(existingReminder, newDate, effective.dueTime);
+      const overrideId = effective.recurrenceParentId ? effective.id : undefined;
+      // Remove the original occurrence FIRST is deliberately avoided —
+      // instead the new standalone task is created first, and only once
+      // that succeeds is the original occurrence removed. If the create
+      // step fails, the original occurrence is untouched (safe, visible,
+      // retryable); the alternative order could leave the user with the
+      // occurrence gone and no replacement if the second step failed.
+      await addTask({
+        title: effective.title,
+        description: effective.description,
+        dueDate: newDate,
+        dueTime: effective.dueTime,
+        priority: effective.priority,
+        category: effective.category,
+        estimatedMinutes: effective.estimatedMinutes,
+        reminder: newReminder,
+      });
+      await deleteTaskOccurrence(row.seriesId as string, row.occurrenceDate as string, overrideId);
+      return;
+    }
+
+    // Ordinary, non-recurring task (or an occurrence override reached
+    // via some other future entry point without occurrence context —
+    // treated the same as a plain task, since its own due_date directly
+    // controls its position when it has no occurrence slot).
+    const existingReminder = reminders.find((r) => r.taskId === row.editTask.id) ?? null;
+    const newReminder = computeMovedReminder(existingReminder, newDate, row.editTask.dueTime);
+    await updateTask(row.editTask.id, {
+      title: row.editTask.title,
+      description: row.editTask.description,
+      dueDate: newDate,
+      dueTime: row.editTask.dueTime,
+      priority: row.editTask.priority,
+      category: row.editTask.category,
+      estimatedMinutes: row.editTask.estimatedMinutes,
+      reminder: newReminder,
+    });
+  }
+
+  async function handleConfirmMoveTo() {
+    if (!moveToDate || selectedRows.length === 0) return;
+    setBulkBusy(true);
+    setBulkError(null);
+    const rows = selectedRows;
+    const results = await Promise.allSettled(rows.map((row) => moveSingleRow(row, moveToDate)));
+    const failedKeys = new Set<string>();
+    results.forEach((result, i) => {
+      if (result.status === 'rejected') failedKeys.add(rowKey(rows[i]));
+    });
+    setBulkBusy(false);
+    setMoveToOpen(false);
+    if (failedKeys.size > 0) {
+      setSelectedKeys(failedKeys);
+      setBulkError(formatString(t.tasks.bulkPartialError, { failed: failedKeys.size, total: rows.length }));
+    } else {
+      exitSelectionMode();
+    }
+  }
+
+  /**
+   * Archives ONE selected row. "Bulk selection means THIS OCCURRENCE
+   * ONLY" — a recurring occurrence, virtual or an existing override,
+   * always archives just that date, never the series parent. A still-
+   * virtual occurrence is materialized into an override AND archived in
+   * one write (archiveTaskOccurrenceOverride) — never a separate
+   * create-then-archive pair, which could leave a real, unarchived,
+   * visible override behind if the second step failed. An ordinary task,
+   * or a row with no occurrence context at all (the rare "ended series"
+   * fallback in "All"), archives its own row directly.
+   */
+  async function archiveSingleRow(row: FilteredRow) {
+    const isRecurringOccurrence = Boolean(row.seriesId && row.occurrenceDate);
+    if (isRecurringOccurrence) {
+      await archiveTaskOccurrenceOverride(
+        row.seriesId as string,
+        row.occurrenceDate as string,
+        taskAsMoveOrArchiveInput(row.editTask, row.occurrenceDate),
+      );
+      return;
+    }
+    await archiveTask(row.editTask.id);
+  }
+
+  async function handleBulkArchive() {
+    if (selectedRows.length === 0) return;
+    setBulkBusy(true);
+    setBulkError(null);
+    const rows = selectedRows;
+    const results = await Promise.allSettled(rows.map((row) => archiveSingleRow(row)));
+    const failedKeys = new Set<string>();
+    results.forEach((result, i) => {
+      if (result.status === 'rejected') failedKeys.add(rowKey(rows[i]));
+    });
+    setBulkBusy(false);
+    if (failedKeys.size > 0) {
+      setSelectedKeys(failedKeys);
+      setBulkError(formatString(t.tasks.bulkPartialError, { failed: failedKeys.size, total: rows.length }));
+    } else {
+      exitSelectionMode();
+    }
+  }
+
+  /**
+   * Deletes ONE selected row. A recurring occurrence (virtual or an
+   * existing override) ALWAYS resolves to deleteTaskOccurrence — this
+   * occurrence only — regardless of how many occurrences of the SAME
+   * series are selected together; the parent series is never touched by
+   * bulk delete under any circumstance. Whole-series delete remains
+   * reachable only through the existing single-item "Entire series"
+   * choice in TaskDetailsSheet.
+   */
+  async function deleteSingleRow(row: FilteredRow) {
+    if (row.seriesId && row.occurrenceDate) {
+      const overrideId = row.editTask.recurrenceParentId ? row.editTask.id : undefined;
+      await deleteTaskOccurrence(row.seriesId, row.occurrenceDate, overrideId);
+      return;
+    }
+    await deleteTask(row.editTask.id);
+  }
+
+  async function handleConfirmBulkDelete() {
+    if (selectedRows.length === 0) return;
+    setBulkBusy(true);
+    setBulkError(null);
+    const rows = selectedRows;
+    const results = await Promise.allSettled(rows.map((row) => deleteSingleRow(row)));
+    const failedKeys = new Set<string>();
+    results.forEach((result, i) => {
+      if (result.status === 'rejected') failedKeys.add(rowKey(rows[i]));
+    });
+    setBulkBusy(false);
+    setDeleteConfirmOpen(false);
+    if (failedKeys.size > 0) {
+      setSelectedKeys(failedKeys);
+      setBulkError(formatString(t.tasks.bulkPartialError, { failed: failedKeys.size, total: rows.length }));
+    } else {
+      exitSelectionMode();
+    }
+  }
+
   function openAdd() {
     setEditingTask(null);
     setSheetHidesRecurrence(false);
@@ -470,6 +744,34 @@ export default function TasksPage() {
       <Header title={t.tasks.title} />
 
       <div className="tasks-page">
+        <div className="tasks-toolbar">
+          {!selectionMode ? (
+            <>
+              <button type="button" className="tasks-toolbar__link" onClick={() => navigate('/tasks/archived')}>
+                {t.tasks.viewArchivedTasks}
+              </button>
+              <button type="button" className="tasks-toolbar__link" onClick={enterSelectionMode}>
+                {t.tasks.select}
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="tasks-toolbar__link" onClick={exitSelectionMode}>
+                {t.tasks.cancel}
+              </button>
+              <span className="tasks-toolbar__count">
+                {formatString(t.tasks.selectedCount, { count: selectedKeys.size })}
+              </span>
+              <button type="button" className="tasks-toolbar__link" onClick={selectAllVisible}>
+                {t.tasks.selectAll}
+              </button>
+              <button type="button" className="tasks-toolbar__link tasks-toolbar__link--done" onClick={exitSelectionMode}>
+                {t.tasks.done}
+              </button>
+            </>
+          )}
+        </div>
+
         <div className="tasks-filters scroll-row">
           {filters.map((f) => (
             <button
@@ -483,6 +785,7 @@ export default function TasksPage() {
         </div>
 
         {tasksError && <p className="tasks-error-banner">{tasksError}</p>}
+        {bulkError && <p className="tasks-error-banner">{bulkError}</p>}
 
         <Card padding="md">
           {tasksLoading ? (
@@ -491,6 +794,7 @@ export default function TasksPage() {
             <EmptyState title={t.tasks.emptyTitle} subtitle={t.tasks.emptySubtitle} />
           ) : (
             filtered.map((row) => {
+              const key = rowKey(row);
               const rowDate = row.occurrenceDate ?? row.row.dueDate;
               const isOverdueRow =
                 row.row.status !== 'completed' &&
@@ -505,16 +809,19 @@ export default function TasksPage() {
                 : undefined;
               return (
                 <TaskRow
-                  key={row.occurrenceDate ? `${row.seriesId}::${row.occurrenceDate}` : row.row.id}
+                  key={key}
                   task={row.row}
                   onToggle={() => handleToggle(row)}
                   onOpen={() => openDetails(row)}
-                  onEditRequest={() => openDetails(row, 'edit')}
-                  onDeleteRequest={() => openDetails(row, 'delete')}
+                  onEditRequest={selectionMode ? undefined : () => openDetails(row, 'edit')}
+                  onDeleteRequest={selectionMode ? undefined : () => openDetails(row, 'delete')}
                   hasReminder={reminders.some((r) => r.taskId === row.editTask.id)}
                   overdue={isOverdueRow}
                   dateLabel={dateLabel}
                   isRecurring={Boolean(row.occurrenceDate)}
+                  selectionMode={selectionMode}
+                  selected={selectedKeys.has(key)}
+                  onSelectToggle={() => toggleRowSelected(row)}
                 />
               );
             })
@@ -542,11 +849,100 @@ export default function TasksPage() {
         )}
       </div>
 
-      <IconButton aria-label={t.tasks.addTask} className="tasks-fab" onClick={openAdd}>
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-          <path d="M12 5v14M5 12h14" stroke="white" strokeWidth="2.2" strokeLinecap="round" />
-        </svg>
-      </IconButton>
+      {!selectionMode && (
+        <IconButton aria-label={t.tasks.addTask} className="tasks-fab" onClick={openAdd}>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+            <path d="M12 5v14M5 12h14" stroke="white" strokeWidth="2.2" strokeLinecap="round" />
+          </svg>
+        </IconButton>
+      )}
+
+      {selectionMode && selectedKeys.size > 0 && (
+        <div className="tasks-bulk-bar">
+          {filter !== 'completed' && (
+            <button
+              type="button"
+              className="tasks-bulk-bar__action"
+              disabled={bulkBusy}
+              onClick={() => {
+                setMoveToDate(todayISO);
+                setMoveToOpen(true);
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="4" y="5" width="16" height="16" rx="2" stroke="currentColor" strokeWidth="1.7" />
+                <path d="M4 9h16M8 3v4M16 3v4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+              </svg>
+              <span>{t.tasks.moveTo}</span>
+            </button>
+          )}
+          <button type="button" className="tasks-bulk-bar__action" disabled={bulkBusy} onClick={handleBulkArchive}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="4" y="4" width="16" height="4" rx="1" stroke="currentColor" strokeWidth="1.7" />
+              <path d="M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+            </svg>
+            <span>{t.tasks.archive}</span>
+          </button>
+          <button
+            type="button"
+            className="tasks-bulk-bar__action tasks-bulk-bar__action--danger"
+            disabled={bulkBusy}
+            onClick={() => setDeleteConfirmOpen(true)}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path
+                d="M5 7h14M9.5 7V5.2A1.2 1.2 0 0110.7 4h2.6a1.2 1.2 0 011.2 1.2V7M7.5 7l.7 12a1.5 1.5 0 001.5 1.4h4.6a1.5 1.5 0 001.5-1.4l.7-12"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <span>{t.tasks.delete}</span>
+          </button>
+        </div>
+      )}
+
+      {moveToOpen && (
+        <div className="add-task-overlay" role="dialog" aria-modal="true" aria-label={t.tasks.moveTo}>
+          <Card padding="lg" className="tasks-move-sheet">
+            <p className="tasks-move-sheet__title">{t.tasks.chooseDate}</p>
+            <input
+              type="date"
+              className="tasks-move-sheet__input"
+              value={moveToDate}
+              onChange={(e) => setMoveToDate(e.target.value)}
+            />
+            <div className="tasks-occurrence-choice__actions">
+              <Button variant="ghost" fullWidth onClick={() => setMoveToOpen(false)} disabled={bulkBusy}>
+                {t.tasks.cancel}
+              </Button>
+              <Button fullWidth onClick={handleConfirmMoveTo} disabled={bulkBusy || !moveToDate}>
+                {bulkBusy ? '…' : t.tasks.moveTasks}
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {deleteConfirmOpen && (
+        <div className="add-task-overlay" role="dialog" aria-modal="true" aria-label={t.tasks.delete}>
+          <Card padding="lg" className="tasks-occurrence-choice">
+            <p className="tasks-occurrence-choice__title">
+              {formatString(t.tasks.deleteConfirmTitle, { count: selectedKeys.size })}
+            </p>
+            <p className="tasks-move-sheet__warning">{t.tasks.deleteConfirmWarning}</p>
+            <div className="tasks-occurrence-choice__actions">
+              <Button variant="ghost" fullWidth onClick={() => setDeleteConfirmOpen(false)} disabled={bulkBusy}>
+                {t.tasks.cancel}
+              </Button>
+              <Button variant="danger" fullWidth onClick={handleConfirmBulkDelete} disabled={bulkBusy}>
+                {bulkBusy ? '…' : t.tasks.delete}
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
 
       <AddTaskSheet
         open={sheetOpen}
