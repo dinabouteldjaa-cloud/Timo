@@ -725,6 +725,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           effectiveFields,
         );
         setTasks((prev) => [detached, ...prev.filter((task) => task.id !== detached.id)]);
+        setTaskOccurrenceSkips((prev) => new Set(prev).add(`${seriesId}::${occurrenceDate}`));
         await applyTaskReminder(detached.id, reminder);
         return detached;
       } catch (err) {
