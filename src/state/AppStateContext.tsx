@@ -103,6 +103,15 @@ interface AppStateValue {
   firstDayOfWeek: number;
   updateFirstDayOfWeek: (value: number) => Promise<void>;
 
+  // Working days (0=Sun..6=Sat) — what "weekday" MEANS for this user
+  // (e.g. Sunday-Thursday vs Monday-Friday). Completely independent of
+  // firstDayOfWeek — never derived from it. Used by Brain Dump's "every
+  // weekday" interpretation and describeRecurrence's "Every weekday"
+  // label. Defaults to [1,2,3,4,5] if the profile row can't be read or
+  // the value is somehow missing/invalid.
+  workingDays: number[];
+  updateWorkingDays: (days: number[]) => Promise<void>;
+
   tasks: Task[];
   tasksLoading: boolean;
   tasksError: string | null;
@@ -188,14 +197,32 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const userId = user?.id ?? null;
 
-  // --- First day of week preference (DISPLAY ORDER ONLY — see
-  // src/lib/weekUtils.ts) ---------------------------------------------
+  // --- Profile preferences: first_day_of_week (DISPLAY ORDER ONLY — see
+  // src/lib/weekUtils.ts) and working_days (what "weekday" MEANS for this
+  // user). Two independent preferences, fetched together in ONE profile
+  // read (not two separate calls) since they live on the same row, but
+  // each validated and defaulted completely independently of the other —
+  // neither is ever derived from the other. ---------------------------
   const DEFAULT_FIRST_DAY_OF_WEEK = 1; // Monday — matches Calendar's own prior hardcoded default exactly
+  const DEFAULT_WORKING_DAYS = [1, 2, 3, 4, 5]; // Mon-Fri — matches Brain Dump's own prior hardcoded default exactly
   const [firstDayOfWeek, setFirstDayOfWeek] = useState<number>(DEFAULT_FIRST_DAY_OF_WEEK);
+  const [workingDays, setWorkingDays] = useState<number[]>(DEFAULT_WORKING_DAYS);
+
+  function isValidWorkingDays(value: unknown): value is number[] {
+    if (!Array.isArray(value) || value.length === 0) return false;
+    const seen = new Set<number>();
+    for (const d of value) {
+      if (typeof d !== 'number' || !Number.isInteger(d) || d < 0 || d > 6) return false;
+      if (seen.has(d)) return false; // duplicate
+      seen.add(d);
+    }
+    return true;
+  }
 
   useEffect(() => {
     if (!userId) {
       setFirstDayOfWeek(DEFAULT_FIRST_DAY_OF_WEEK);
+      setWorkingDays(DEFAULT_WORKING_DAYS);
       return;
     }
     let cancelled = false;
@@ -203,20 +230,28 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       .fetchProfile(userId)
       .then((profile) => {
         if (cancelled) return;
-        const value = profile.firstDayOfWeek;
+        const dayValue = profile.firstDayOfWeek;
         // Defensive: fall back to Monday if the value is somehow missing
         // or outside the valid 0-6 range, rather than passing a bad
         // number through to grid/offset math elsewhere.
         setFirstDayOfWeek(
-          typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 6
-            ? value
+          typeof dayValue === 'number' && Number.isInteger(dayValue) && dayValue >= 0 && dayValue <= 6
+            ? dayValue
             : DEFAULT_FIRST_DAY_OF_WEEK,
         );
+        // Defensive: fall back to Mon-Fri if the value is somehow
+        // missing, empty, non-array, out of range, or contains
+        // duplicates, rather than passing bad data through to Brain
+        // Dump's prompt or the recurrence label.
+        setWorkingDays(isValidWorkingDays(profile.workingDays) ? profile.workingDays : DEFAULT_WORKING_DAYS);
       })
       .catch((err: Error) => {
         // eslint-disable-next-line no-console
-        console.error('[AppState] fetchProfile failed, falling back to Monday', err);
-        if (!cancelled) setFirstDayOfWeek(DEFAULT_FIRST_DAY_OF_WEEK);
+        console.error('[AppState] fetchProfile failed, falling back to defaults', err);
+        if (!cancelled) {
+          setFirstDayOfWeek(DEFAULT_FIRST_DAY_OF_WEEK);
+          setWorkingDays(DEFAULT_WORKING_DAYS);
+        }
       });
     return () => {
       cancelled = true;
@@ -238,6 +273,23 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       }
     },
     [userId, firstDayOfWeek],
+  );
+
+  const updateWorkingDays = useCallback(
+    async (days: number[]) => {
+      if (!userId) return;
+      const previous = workingDays;
+      setWorkingDays(days); // optimistic — same low-stakes, instantly-visible pattern as updateFirstDayOfWeek
+      try {
+        await profilesApi.updateWorkingDays(userId, days);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] updateWorkingDays failed', err);
+        setWorkingDays(previous);
+        throw err;
+      }
+    },
+    [userId, workingDays],
   );
 
   // --- Reminders (loaded once per session; mutated only via tasks/events) --
@@ -1175,6 +1227,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     () => ({
       firstDayOfWeek,
       updateFirstDayOfWeek,
+      workingDays,
+      updateWorkingDays,
       tasks,
       tasksLoading,
       tasksError,
@@ -1223,6 +1277,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     [
       firstDayOfWeek,
       updateFirstDayOfWeek,
+      workingDays,
+      updateWorkingDays,
       tasks,
       tasksLoading,
       tasksError,

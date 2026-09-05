@@ -40,6 +40,10 @@ const fr: Strings = {
   profile: {
     preferences: 'Préférences',
     firstDayOfWeek: 'Premier jour de la semaine',
+    weekdays: 'Jours ouvrés',
+    sundayToThursday: 'Dimanche – Jeudi',
+    mondayToFriday: 'Lundi – Vendredi',
+    custom: 'Personnalisé',
   },
   tasks: {
     title: 'Tâches',

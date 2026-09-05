@@ -105,13 +105,13 @@ async function extractFunctionErrorMessage(error: unknown): Promise<string | nul
   return null;
 }
 
-export async function organizeBrainDump(text: string): Promise<BrainDumpSuggestion[]> {
+export async function organizeBrainDump(text: string, workingDays: number[]): Promise<BrainDumpSuggestion[]> {
   const now = new Date();
   const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const localTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
   const { data, error } = await supabase.functions.invoke('brain-dump', {
-    body: { text, localDate, localTime },
+    body: { text, localDate, localTime, workingDays },
   });
 
   if (error) {

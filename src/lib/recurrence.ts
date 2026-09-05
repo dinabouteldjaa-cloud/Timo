@@ -105,8 +105,22 @@ const WEEKDAY_LONG = [
   'Saturday',
 ];
 
-/** Short, human label for Task/Event Details, e.g. "Every Monday", "Sun, Tue, Thu". Null for non-recurring. */
-export function describeRecurrence(rule: RecurrenceRule, baseDateISO: string): string | null {
+/**
+ * Short, human label for Task/Event Details, e.g. "Every Monday", "Sun,
+ * Tue, Thu". Null for non-recurring.
+ *
+ * workingDays (default Mon-Fri, for any caller without profile access —
+ * see AppStateContext.workingDays) is DISPLAY LABEL ONLY: it decides
+ * whether a custom recurrence's exact day set matches what this user
+ * calls "weekday" closely enough to show the friendly "Every weekday"
+ * phrase, instead of spelling out the day list. It never affects
+ * isOccurrence/getOccurrencesInRange or any actual date calculation.
+ */
+export function describeRecurrence(
+  rule: RecurrenceRule,
+  baseDateISO: string,
+  workingDays: number[] = [1, 2, 3, 4, 5],
+): string | null {
   switch (rule.type) {
     case 'none':
       return null;
@@ -119,7 +133,10 @@ export function describeRecurrence(rule: RecurrenceRule, baseDateISO: string): s
     case 'custom': {
       const days = [...(rule.daysOfWeek ?? [])].sort((a, b) => a - b);
       if (days.length === 7) return 'Every day';
-      if (days.length === 5 && [1, 2, 3, 4, 5].every((d) => days.includes(d))) return 'Every weekday';
+      const sortedWorkingDays = [...workingDays].sort((a, b) => a - b);
+      const matchesWorkingDays =
+        days.length === sortedWorkingDays.length && days.every((d, i) => d === sortedWorkingDays[i]);
+      if (matchesWorkingDays) return 'Every weekday';
       if (days.length === 0) return null;
       return days.map((d) => WEEKDAY_SHORT[d]).join(', ');
     }

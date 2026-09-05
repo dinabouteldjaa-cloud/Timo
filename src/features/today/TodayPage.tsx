@@ -73,6 +73,7 @@ export default function TodayPage() {
     focusSession,
     todayFocusSummary,
     selectFocusTask,
+    workingDays,
   } = useAppState();
 
   const [taskSheetOpen, setTaskSheetOpen] = useState(false);
@@ -388,6 +389,7 @@ export default function TodayPage() {
                 (tasks.find((tsk) => tsk.id === detailsEntry.seriesId) ?? detailsEntry.task).dueDate ??
                   detailsEntry.occurrenceDate ??
                   todayISO,
+                workingDays,
               )
             : null
         }

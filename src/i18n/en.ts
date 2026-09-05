@@ -43,6 +43,10 @@ const en = {
   profile: {
     preferences: 'Preferences',
     firstDayOfWeek: 'First day of week',
+    weekdays: 'Weekdays',
+    sundayToThursday: 'Sunday – Thursday',
+    mondayToFriday: 'Monday – Friday',
+    custom: 'Custom',
   },
   tasks: {
     title: 'Tasks',

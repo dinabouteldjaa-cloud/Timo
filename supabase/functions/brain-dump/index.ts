@@ -226,6 +226,32 @@ function computeRecurrenceAnchorTable(localDate: string): { weekday: string; dat
   return table;
 }
 
+// Fallback used whenever the client doesn't send a usable workingDays
+// value — matches the previously hardcoded "every weekday" assumption
+// exactly, so any caller that doesn't yet send this (or sends something
+// invalid) sees unchanged behavior.
+const DEFAULT_WORKING_DAYS = [1, 2, 3, 4, 5];
+
+/**
+ * Validates the request-level workingDays preference: must be a
+ * non-empty array of unique integers 0-6. Falls back to
+ * DEFAULT_WORKING_DAYS wholesale on any violation, rather than trying to
+ * salvage a partially-valid array — this is a top-level request
+ * parameter (not a per-suggestion field), so there's no "drop just the
+ * bad part and keep going" story that makes sense here the way it does
+ * for normalizeRecurrence's per-suggestion daysOfWeek.
+ */
+function normalizeWorkingDays(raw: unknown): number[] {
+  if (!Array.isArray(raw) || raw.length === 0) return DEFAULT_WORKING_DAYS;
+  const seen = new Set<number>();
+  for (const d of raw) {
+    if (typeof d !== 'number' || !Number.isInteger(d) || d < 0 || d > 6) return DEFAULT_WORKING_DAYS;
+    if (seen.has(d)) return DEFAULT_WORKING_DAYS;
+    seen.add(d);
+  }
+  return [...(raw as number[])].sort((a, b) => a - b);
+}
+
 // Only these exact offsets are supported by the existing reminder preset
 // system (see src/lib/reminderPresets.ts) — an arbitrary stated lead time
 // is snapped to the nearest one rather than inventing an unsupported value.
@@ -365,7 +391,7 @@ function normalizeSuggestion(raw: RawSuggestion): NormalizedSuggestion | null {
   };
 }
 
-function buildSystemPrompt(localDate: string, localTime: string): string {
+function buildSystemPrompt(localDate: string, localTime: string, workingDays: number[]): string {
   const { todayWeekday, upcoming } = computeWeekdayTable(localDate);
   // One weekday per line, not a dense comma-joined single line. The
   // deterministic table itself was always correct (verified
@@ -381,6 +407,14 @@ function buildSystemPrompt(localDate: string, localTime: string): string {
   const recurrenceAnchorLines = computeRecurrenceAnchorTable(localDate)
     .map((u) => `  - ${u.weekday}: ${u.date}`)
     .join('\n');
+
+  // "every weekday" must mean whatever this specific user configured as
+  // their working days (e.g. Sunday-Thursday), never a hardcoded
+  // Monday-Friday. workingDays is already validated/sorted/deduped by
+  // normalizeWorkingDays before this function is ever called.
+  const workingDaysNames = workingDays.map((d) => WEEKDAY_NAMES[d]);
+  const workingDaysList = workingDaysNames.join(', ');
+  const workingDaysJson = JSON.stringify(workingDays);
 
   return `You organize messy personal planning notes for Timo, a task and calendar app.
 
@@ -441,7 +475,7 @@ ${recurrenceAnchorLines}
   Find the matching weekday(s) in this table and use the EARLIEST date listed for them — if today's own line matches, use today. For example, if today's line above is "Monday", then "Study French every Monday" starts TODAY, not next Monday; if today's line is "Wednesday", then "Study French every Monday and Wednesday" also starts TODAY, because Wednesday is today. Do not use the upcoming-week table for recurring items — only for one-off, non-recurring dates.
 - One repeated weekday ("every Monday", "each Friday") -> { type: "weekly", daysOfWeek: null, endDate: null }. Weekly recurrence repeats on whatever weekday the item's OWN date falls on, so resolve the item's date using the RECURRENCE ANCHOR DATE rule above.
 - More than one specific weekday ("every Monday and Wednesday") -> { type: "custom", daysOfWeek: [the matching 0-6 numbers], endDate: null } (0=Sunday..6=Saturday). Resolve the item's date using the RECURRENCE ANCHOR DATE rule above — the earliest of the matching weekdays, which may be today.
-- "every weekday" -> { type: "custom", daysOfWeek: [1,2,3,4,5], endDate: null }. Resolve the item's date using the RECURRENCE ANCHOR DATE rule above the same way.
+- "every weekday" -> { type: "custom", daysOfWeek: ${workingDaysJson}, endDate: null } — this user's configured working days are ${workingDaysList}; "every weekday" ALWAYS means exactly this set for this user, never a different assumption. Resolve the item's date using the RECURRENCE ANCHOR DATE rule above the same way.
 - A monthly phrase anchored to a day of the month ("on the 1st every month", "monthly on the 15th") -> { type: "monthly", daysOfWeek: null, endDate: null }. Monthly recurrence repeats on whatever day-of-month the item's OWN date falls on, so the item's date must be the NEXT applicable occurrence of that day-of-month (e.g. "on the 1st every month" said on ${localDate} needs the next 1st-of-month date, today's or next month's, whichever comes first on or after today — if today IS the 1st, use today).
 - UNSUPPORTED patterns — "every 2 weeks", "every 3 days", "every 6 months", "every other Monday", or any other interval/skip pattern — do NOT approximate these with daily/weekly/monthly/custom. Still extract the task/event itself as a normal one-off item, exactly as if no recurrence wording were present, and set recurrence to null.
 - endDate: only set when the text clearly states when the repetition stops (e.g. "every Monday until December 31" -> resolve that exact date the same way any other date is resolved). Leave endDate null if the end is vague or unstated — never invent one.
@@ -555,7 +589,7 @@ class GroqHttpError extends Error {
   }
 }
 
-async function requestGroqOnce(apiKey: string, text: string, localDate: string, localTime: string) {
+async function requestGroqOnce(apiKey: string, text: string, localDate: string, localTime: string, workingDays: number[]) {
   const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -576,7 +610,7 @@ async function requestGroqOnce(apiKey: string, text: string, localDate: string, 
       reasoning_effort: 'low',
       response_format: { type: 'json_schema', json_schema: SUGGESTION_JSON_SCHEMA },
       messages: [
-        { role: 'system', content: buildSystemPrompt(localDate, localTime) },
+        { role: 'system', content: buildSystemPrompt(localDate, localTime, workingDays) },
         { role: 'user', content: text },
       ],
     }),
@@ -613,9 +647,9 @@ async function requestGroqOnce(apiKey: string, text: string, localDate: string, 
  * failure after a successful response) is also not retried here — that's
  * a model-output-quality issue, not a transient provider/network failure.
  */
-async function callGroq(apiKey: string, text: string, localDate: string, localTime: string) {
+async function callGroq(apiKey: string, text: string, localDate: string, localTime: string, workingDays: number[]) {
   try {
-    return await requestGroqOnce(apiKey, text, localDate, localTime);
+    return await requestGroqOnce(apiKey, text, localDate, localTime, workingDays);
   } catch (err) {
     const isTransient =
       err instanceof GroqHttpError ? err.status >= 500 : err instanceof Error;
@@ -627,7 +661,7 @@ async function callGroq(apiKey: string, text: string, localDate: string, localTi
       err instanceof Error ? err.message : err,
     );
     await new Promise((resolve) => setTimeout(resolve, 400));
-    return await requestGroqOnce(apiKey, text, localDate, localTime);
+    return await requestGroqOnce(apiKey, text, localDate, localTime, workingDays);
   }
 }
 
@@ -678,7 +712,7 @@ Deno.serve(async (req) => {
     });
   }
 
-  let body: { text?: unknown; localDate?: unknown; localTime?: unknown };
+  let body: { text?: unknown; localDate?: unknown; localTime?: unknown; workingDays?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -708,6 +742,7 @@ Deno.serve(async (req) => {
       : new Date().toISOString().slice(0, 10);
   const localTime =
     typeof body.localTime === 'string' && TIME_RE.test(body.localTime) ? body.localTime : '09:00';
+  const workingDays = normalizeWorkingDays(body.workingDays);
 
   const apiKey = Deno.env.get('GROQ_API_KEY');
   if (!apiKey) {
@@ -723,7 +758,7 @@ Deno.serve(async (req) => {
 
   let rawText: string;
   try {
-    rawText = await callGroq(apiKey, text, localDate, localTime);
+    rawText = await callGroq(apiKey, text, localDate, localTime, workingDays);
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('[brain-dump] provider error', err instanceof Error ? err.message : err);

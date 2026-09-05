@@ -45,7 +45,7 @@ function resolveReminderSelection(suggestion: BrainDumpSuggestion): ReminderSele
 
 export default function BrainDumpPage() {
   const navigate = useNavigate();
-  const { tasks, events, addTask, addEvent, attachTaskReminder, attachEventReminder } = useAppState();
+  const { tasks, events, addTask, addEvent, attachTaskReminder, attachEventReminder, workingDays } = useAppState();
 
   const [step, setStep] = useState<Step>('input');
   const [text, setText] = useState('');
@@ -87,7 +87,7 @@ export default function BrainDumpPage() {
     setErrorMessage(null);
 
     try {
-      const raw = await organizeBrainDump(trimmed);
+      const raw = await organizeBrainDump(trimmed, workingDays);
 
       if (raw.length === 0) {
         setErrorMessage('No actionable tasks or events found.');

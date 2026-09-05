@@ -75,6 +75,7 @@ export default function CalendarPage() {
   const navigate = useNavigate();
   const {
     firstDayOfWeek,
+    workingDays,
     events,
     eventsLoading,
     eventsError,
@@ -617,6 +618,7 @@ export default function CalendarPage() {
                     .recurrenceDaysOfWeek,
                 },
                 (events.find((e) => e.id === detailsEventOccurrence.seriesId) ?? detailsEventOccurrence.event).eventDate,
+                workingDays,
               )
             : null
         }
@@ -691,6 +693,7 @@ export default function CalendarPage() {
                 },
                 (tasks.find((tsk) => tsk.id === detailsTaskOccurrence.seriesId) ?? detailsTaskOccurrence.task).dueDate ??
                   detailsTaskOccurrence.date,
+                workingDays,
               )
             : null
         }

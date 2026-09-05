@@ -87,6 +87,7 @@ export default function TasksPage() {
     taskOccurrenceSkips,
     taskOccurrenceCompletionRecords,
     setTaskOccurrenceCompletion,
+    workingDays,
   } = useAppState();
   const [filter, setFilter] = useState<Filter>('all');
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -993,6 +994,7 @@ export default function TasksPage() {
                 },
                 (tasks.find((tsk) => tsk.id === detailsRow.seriesId) ?? detailsRow.editTask).dueDate ??
                   detailsRow.occurrenceDate,
+                workingDays,
               )
             : null
         }
