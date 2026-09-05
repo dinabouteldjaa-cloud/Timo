@@ -446,10 +446,11 @@ Deno.serve(async (req) => {
   const { data: recurringTaskReminders } = await supabase
     .from('reminders')
     .select(
-      'id, user_id, remind_at, offset_minutes, task_id, event_id, tasks!inner(due_date, recurrence_type, recurrence_days_of_week, recurrence_end_date)',
+      'id, user_id, remind_at, offset_minutes, task_id, event_id, tasks!inner(due_date, recurrence_type, recurrence_days_of_week, recurrence_end_date, archived_at)',
     )
     .not('task_id', 'is', null)
-    .neq('tasks.recurrence_type', 'none');
+    .neq('tasks.recurrence_type', 'none')
+    .is('tasks.archived_at', null);
 
   const { data: recurringEventReminders } = await supabase
     .from('reminders')
@@ -520,6 +521,17 @@ Deno.serve(async (req) => {
   // set one while editing "this occurrence") is already handled
   // correctly and separately by PASS 1 above. Skipping the parent here
   // is what prevents a duplicate notification for the same occurrence.
+  //
+  // This is also what correctly suppresses an INDIVIDUALLY ARCHIVED
+  // occurrence without suppressing the whole series (see
+  // 0012_task_archiving.sql): archiving one occurrence always
+  // materializes an override for that exact date (see
+  // tasksApi.archiveTaskOccurrenceOverride), so this check already sees
+  // "an override exists for this date" and skips the series reminder for
+  // that date only — every other date is unaffected. The archived
+  // override's OWN reminder (if it has one) is separately excluded by
+  // PASS 1's `t.archived_at is null` condition — no additional logic is
+  // needed here for that case.
   const { data: candidateTaskOverrides } = await supabase
     .from('tasks')
     .select('recurrence_parent_id, recurrence_occurrence_date')

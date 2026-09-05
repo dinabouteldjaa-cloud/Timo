@@ -79,6 +79,7 @@ export default function TasksPage() {
     deleteTask,
     deleteTaskOccurrence,
     saveTaskOccurrenceOverride,
+    moveTaskOccurrenceToDate,
     archiveTask,
     archiveTaskOccurrenceOverride,
     reminders,
@@ -224,7 +225,10 @@ export default function TasksPage() {
   // recurrence range just to discover what's been completed.
   const completedHistory = useMemo(() => {
     const nonRecurringCompleted = tasks
-      .filter((task) => task.status === 'completed' && task.recurrenceType === 'none' && !task.recurrenceParentId)
+      .filter(
+        (task) =>
+          task.status === 'completed' && task.recurrenceType === 'none' && !task.recurrenceParentId && !task.archivedAt,
+      )
       .map((task) => ({ row: task, editTask: task, completedAt: task.completedAt ?? '' }));
 
     const recurringCompleted = resolveCompletedTaskOccurrences(
@@ -267,6 +271,7 @@ export default function TasksPage() {
           (task) =>
             task.recurrenceType === 'none' &&
             !task.recurrenceParentId &&
+            !task.archivedAt &&
             task.status !== 'completed' &&
             task.dueDate &&
             isOccurrenceOverdue(task.dueDate, task.dueTime, todayISO, nowTimeHHMM),
@@ -372,7 +377,7 @@ export default function TasksPage() {
     // logic Today/Upcoming already use — no new logic, just correctly
     // supplying the context that logic already expects.
     return tasks
-      .filter((task) => !task.recurrenceParentId)
+      .filter((task) => !task.recurrenceParentId && !task.archivedAt)
       .map((task) => {
         if (task.recurrenceType === 'none') {
           return { row: task, editTask: task };
@@ -520,24 +525,26 @@ export default function TasksPage() {
       const effective = row.editTask;
       const existingReminder = reminders.find((r) => r.taskId === effective.id) ?? null;
       const newReminder = computeMovedReminder(existingReminder, newDate, effective.dueTime);
-      const overrideId = effective.recurrenceParentId ? effective.id : undefined;
-      // Remove the original occurrence FIRST is deliberately avoided —
-      // instead the new standalone task is created first, and only once
-      // that succeeds is the original occurrence removed. If the create
-      // step fails, the original occurrence is untouched (safe, visible,
-      // retryable); the alternative order could leave the user with the
-      // occurrence gone and no replacement if the second step failed.
-      await addTask({
-        title: effective.title,
-        description: effective.description,
-        dueDate: newDate,
-        dueTime: effective.dueTime,
-        priority: effective.priority,
-        category: effective.category,
-        estimatedMinutes: effective.estimatedMinutes,
-        reminder: newReminder,
-      });
-      await deleteTaskOccurrence(row.seriesId as string, row.occurrenceDate as string, overrideId);
+      // Retry-safe detach (see AppStateContext.moveTaskOccurrenceToDate /
+      // tasksApi.detachTaskOccurrenceToDate for exactly how a retry after
+      // a partial failure reuses the same row instead of creating a
+      // second standalone task).
+      await moveTaskOccurrenceToDate(
+        row.seriesId as string,
+        row.occurrenceDate as string,
+        newDate,
+        {
+          title: effective.title,
+          description: effective.description,
+          dueDate: newDate,
+          dueTime: effective.dueTime,
+          priority: effective.priority,
+          category: effective.category,
+          estimatedMinutes: effective.estimatedMinutes,
+          reminder: null,
+        },
+        newReminder,
+      );
       return;
     }
 

@@ -346,6 +346,101 @@ export async function createTaskOccurrenceOverride(
   return rowToTask(data as TaskRow);
 }
 
+/**
+ * Moves ONE occurrence of a recurring series to `newDate` by detaching it
+ * into a fully standalone, non-recurring task — never by changing an
+ * override's due_date in place (confirmed during inspection that an
+ * occurrence's displayed position always comes from its
+ * recurrence_occurrence_date SLOT, not its own due_date field, so that
+ * alone would not actually reposition it).
+ *
+ * RETRY-SAFETY (see chat report): the naive "create a new standalone
+ * task, then remove the original occurrence" sequence has a failure
+ * window — if creation succeeds but removal fails, a retry would create
+ * a SECOND standalone task. This avoids that without any new schema or
+ * a transaction system, by reusing the EXISTING unique index on
+ * (recurrence_parent_id, recurrence_occurrence_date) as a natural
+ * idempotency key:
+ *
+ *   1. Find-or-create a row for this exact (seriesId, occurrenceDate)
+ *      slot — i.e. the SAME select-then-update-or-insert pattern already
+ *      used by createTaskOccurrenceOverride — but with its due_date
+ *      already set to the NEW date. A retry that reaches this step again
+ *      finds the row IT already created (or an existing override) via
+ *      that same unique pair, and reuses it instead of inserting a
+ *      second one — this is what actually prevents the duplicate.
+ *   2. Remove the original occurrence from the series (already
+ *      idempotent — see skipTaskOccurrence's own comment).
+ *   3. Clear recurrence_parent_id/recurrence_occurrence_date on that same
+ *      row, completing the detach. A retry that only reaches this step
+ *      (because step 2 or 3 itself failed previously) finds the exact
+ *      same row again via step 1's lookup and simply clears the same
+ *      already-correct fields — harmless either way.
+ *
+ * The row's id never changes across this process, so anything already
+ * tied to it (a reminder, for instance) stays correctly attached
+ * throughout.
+ */
+export async function detachTaskOccurrenceToDate(
+  userId: string,
+  seriesId: string,
+  occurrenceDate: string,
+  newDate: string,
+  effectiveFields: TaskInput,
+): Promise<Task> {
+  const { data: existing, error: findError } = await supabase
+    .from('tasks')
+    .select('id')
+    .eq('recurrence_parent_id', seriesId)
+    .eq('recurrence_occurrence_date', occurrenceDate)
+    .maybeSingle();
+
+  if (findError) throw toSupabaseError('Could not move this occurrence', findError);
+
+  const fields = {
+    title: effectiveFields.title.trim(),
+    description: effectiveFields.description?.trim() || null,
+    priority: effectiveFields.priority,
+    category: effectiveFields.category,
+    due_date: newDate,
+    due_time: effectiveFields.dueTime || null,
+    estimated_duration_minutes: effectiveFields.estimatedMinutes ?? null,
+  };
+
+  let taskId: string;
+  if (existing) {
+    const { error } = await supabase.from('tasks').update(fields).eq('id', existing.id);
+    if (error) throw toSupabaseError('Could not move this occurrence', error);
+    taskId = existing.id;
+  } else {
+    const { data, error } = await supabase
+      .from('tasks')
+      .insert({
+        user_id: userId,
+        ...fields,
+        recurrence_type: 'none',
+        recurrence_parent_id: seriesId,
+        recurrence_occurrence_date: occurrenceDate,
+      })
+      .select('id')
+      .single();
+    if (error) throw toSupabaseError('Could not move this occurrence', error);
+    taskId = (data as { id: string }).id;
+  }
+
+  await skipTaskOccurrence(userId, seriesId, occurrenceDate);
+
+  const { data: detached, error: detachError } = await supabase
+    .from('tasks')
+    .update({ recurrence_parent_id: null, recurrence_occurrence_date: null })
+    .eq('id', taskId)
+    .select('*')
+    .single();
+
+  if (detachError) throw toSupabaseError('Could not finish moving this occurrence', detachError);
+  return rowToTask(detached as TaskRow);
+}
+
 /** Marks one occurrence of a recurring task complete without touching the series. */
 export async function completeTaskOccurrence(
   userId: string,

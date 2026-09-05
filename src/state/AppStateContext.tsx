@@ -122,6 +122,13 @@ interface AppStateValue {
   setTaskOccurrenceCompletion: (taskId: string, occurrenceDate: string, completed: boolean) => Promise<void>;
   deleteTaskOccurrence: (seriesId: string, occurrenceDate: string, overrideTaskId?: string) => Promise<void>;
   saveTaskOccurrenceOverride: (seriesId: string, occurrenceDate: string, input: NewTaskInput) => Promise<Task>;
+  moveTaskOccurrenceToDate: (
+    seriesId: string,
+    occurrenceDate: string,
+    newDate: string,
+    effectiveFields: NewTaskInput,
+    reminder: ReminderSelection | null,
+  ) => Promise<Task>;
   deleteEventOccurrence: (seriesId: string, occurrenceDate: string, overrideEventId?: string) => Promise<void>;
   saveEventOccurrenceOverride: (
     seriesId: string,
@@ -688,6 +695,48 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     [userId, applyTaskReminder],
   );
 
+  /**
+   * Moves ONE occurrence of a recurring series to a new date — see
+   * tasksApi.detachTaskOccurrenceToDate's own comment for exactly how
+   * this stays safely retryable after a partial failure, using the
+   * existing (recurrence_parent_id, recurrence_occurrence_date) unique
+   * pair as a natural idempotency key rather than any new schema.
+   * Reminder application is folded in here (via the same applyTaskReminder
+   * already used by addTask/updateTask/saveTaskOccurrenceOverride) so the
+   * whole move — detach + reminder — is one call from the caller's side;
+   * applyTaskReminder's own upsert (keyed on task_id) is already
+   * idempotent too, so retrying this whole action is always safe.
+   */
+  const moveTaskOccurrenceToDate = useCallback(
+    async (
+      seriesId: string,
+      occurrenceDate: string,
+      newDate: string,
+      effectiveFields: NewTaskInput,
+      reminder: ReminderSelection | null,
+    ) => {
+      if (!userId) throw new Error('Not signed in.');
+      try {
+        const detached = await tasksApi.detachTaskOccurrenceToDate(
+          userId,
+          seriesId,
+          occurrenceDate,
+          newDate,
+          effectiveFields,
+        );
+        setTasks((prev) => [detached, ...prev.filter((task) => task.id !== detached.id)]);
+        await applyTaskReminder(detached.id, reminder);
+        return detached;
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[AppState] moveTaskOccurrenceToDate failed', err);
+        setTasksError(err instanceof Error ? err.message : 'Could not move this occurrence.');
+        throw err;
+      }
+    },
+    [userId, applyTaskReminder],
+  );
+
   // --- Calendar events ----------------------------------------------------
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(false);
@@ -1082,6 +1131,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setTaskOccurrenceCompletion,
       deleteTaskOccurrence,
       saveTaskOccurrenceOverride,
+      moveTaskOccurrenceToDate,
       deleteEventOccurrence,
       saveEventOccurrenceOverride,
       events,
@@ -1127,6 +1177,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setTaskOccurrenceCompletion,
       deleteTaskOccurrence,
       saveTaskOccurrenceOverride,
+      moveTaskOccurrenceToDate,
       deleteEventOccurrence,
       saveEventOccurrenceOverride,
       events,
