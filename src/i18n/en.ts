@@ -13,6 +13,7 @@ const en = {
     tasks: 'Tasks',
     calendar: 'Calendar',
     focus: 'Focus',
+    profile: 'Profile',
   },
   common: {
     settings: 'Settings',

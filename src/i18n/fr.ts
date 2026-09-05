@@ -10,6 +10,7 @@ const fr: Strings = {
     tasks: 'Tâches',
     calendar: 'Calendrier',
     focus: 'Focus',
+    profile: 'Profil',
   },
   common: {
     settings: 'Paramètres',
