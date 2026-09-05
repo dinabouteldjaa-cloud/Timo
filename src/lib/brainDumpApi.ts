@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient';
 import { emptyReminderValue, type ReminderPickerValue } from '../components/ui/ReminderPicker';
+import { emptyRecurrenceValue, type RecurrencePickerValue } from '../components/ui/RecurrencePicker';
 import { presetForOffset } from './reminderPresets';
 import type { BrainDumpSuggestion } from '../types/brainDump';
 
@@ -23,6 +24,12 @@ interface RawReminderIntent {
   time?: string;
 }
 
+interface RawRecurrenceIntent {
+  type: 'daily' | 'weekly' | 'monthly' | 'custom';
+  daysOfWeek?: number[];
+  endDate?: string;
+}
+
 interface RawSuggestion {
   type: 'task' | 'event';
   title: string;
@@ -37,6 +44,7 @@ interface RawSuggestion {
   location?: string;
   confidence?: number;
   reminder?: RawReminderIntent;
+  recurrence?: RawRecurrenceIntent;
 }
 
 let nextClientId = 0;
@@ -65,6 +73,23 @@ function reminderIntentToPickerValue(intent: RawReminderIntent | undefined): Rem
   }
 
   return emptyReminderValue();
+}
+
+/**
+ * Converts the Edge Function's recurrence INTENT into the exact same
+ * RecurrencePickerValue shape the existing Add Task/Event recurrence
+ * picker uses, so the Review card can embed that real component
+ * unchanged — no second recurrence representation. endDate maps to ''
+ * (never-ending) when absent, matching RecurrencePickerValue's own
+ * convention exactly.
+ */
+function recurrenceIntentToPickerValue(intent: RawRecurrenceIntent | undefined): RecurrencePickerValue {
+  if (!intent) return emptyRecurrenceValue();
+  return {
+    type: intent.type,
+    daysOfWeek: intent.type === 'custom' ? intent.daysOfWeek ?? [] : [],
+    endDate: intent.endDate ?? '',
+  };
 }
 
 async function extractFunctionErrorMessage(error: unknown): Promise<string | null> {
@@ -98,12 +123,13 @@ export async function organizeBrainDump(text: string): Promise<BrainDumpSuggesti
 
   const suggestions = (data?.suggestions ?? []) as RawSuggestion[];
   return suggestions.map((s) => {
-    const { reminder, ...rest } = s;
+    const { reminder, recurrence, ...rest } = s;
     return {
       ...rest,
       id: makeClientId(),
       included: true,
       reminder: reminderIntentToPickerValue(reminder),
+      recurrence: recurrenceIntentToPickerValue(recurrence),
     };
   });
 }

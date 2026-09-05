@@ -1,6 +1,7 @@
 import Checkbox from '../../components/ui/Checkbox';
 import Badge from '../../components/ui/Badge';
 import ReminderPicker from '../../components/ui/ReminderPicker';
+import RecurrencePicker from '../../components/ui/RecurrencePicker';
 import type { BrainDumpSuggestion } from '../../types/brainDump';
 import type { CalendarEventType, TaskCategory, TaskPriority } from '../../types/task';
 import './SuggestionCard.css';
@@ -104,6 +105,8 @@ export default function SuggestionCard({ suggestion, onChange, onRemove }: Sugge
         parentTime={suggestion.time}
         atLabel={isEvent ? 'At start time' : 'At time'}
       />
+
+      <RecurrencePicker value={suggestion.recurrence} onChange={(recurrence) => onChange({ recurrence })} />
 
       {!isEvent && (
         <>

@@ -1,5 +1,6 @@
 import type { CalendarEventType, TaskCategory, TaskPriority } from './task';
 import type { ReminderPickerValue } from '../components/ui/ReminderPicker';
+import type { RecurrencePickerValue } from '../components/ui/RecurrencePicker';
 
 export type BrainDumpSuggestionType = 'task' | 'event';
 
@@ -36,4 +37,13 @@ export interface BrainDumpSuggestion {
    * detected explicit reminder intent in the text (see brainDumpApi.ts).
    */
   reminder: ReminderPickerValue;
+  /**
+   * Reuses the EXACT same value shape as the existing Add Task/Event
+   * recurrence picker, so the Review card can embed the real
+   * <RecurrencePicker> component unchanged. { type: 'none', ... } means
+   * one-off (not recurring) — the default; recurrence is only ever
+   * populated here when the AI detected explicit repetition wording in
+   * the text (see brainDumpApi.ts).
+   */
+  recurrence: RecurrencePickerValue;
 }

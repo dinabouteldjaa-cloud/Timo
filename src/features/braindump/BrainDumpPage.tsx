@@ -161,6 +161,13 @@ export default function BrainDumpPage() {
             // AppStateContext's `reminders` state in sync immediately,
             // rather than only after a refresh.
             reminder: null,
+            // Mirrors AddTaskSheet's exact existing conversion from
+            // RecurrencePickerValue to NewTaskInput's recurrence fields —
+            // no new conversion logic invented here.
+            recurrenceType: suggestion.recurrence.type,
+            recurrenceDaysOfWeek:
+              suggestion.recurrence.type === 'custom' ? suggestion.recurrence.daysOfWeek : undefined,
+            recurrenceEndDate: suggestion.recurrence.endDate || undefined,
           });
           createdId = created.id;
         } else {
@@ -175,6 +182,10 @@ export default function BrainDumpPage() {
             eventType: suggestion.eventType ?? 'event',
             location: suggestion.location,
             reminder: null,
+            recurrenceType: suggestion.recurrence.type,
+            recurrenceDaysOfWeek:
+              suggestion.recurrence.type === 'custom' ? suggestion.recurrence.daysOfWeek : undefined,
+            recurrenceEndDate: suggestion.recurrence.endDate || undefined,
           });
           createdId = created.id;
         }
