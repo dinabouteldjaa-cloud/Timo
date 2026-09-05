@@ -750,7 +750,7 @@ export default function TasksPage() {
     <>
       <Header title={t.tasks.title} />
 
-      <div className="tasks-page">
+      <div className={`tasks-page ${selectionMode && selectedKeys.size > 0 ? 'tasks-page--bulk-bar-visible' : ''}`}>
         <div className="tasks-toolbar">
           {!selectionMode ? (
             <>

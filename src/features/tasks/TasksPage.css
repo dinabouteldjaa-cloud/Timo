@@ -5,6 +5,14 @@
   padding: var(--space-2) var(--space-5) var(--space-6);
 }
 
+/* Applied only while the bulk action bar is visible (selection mode with
+   at least one item selected) — the bar is fixed-position and doesn't
+   participate in normal document flow, so without this the last rows in
+   the list would render underneath it. */
+.tasks-page--bulk-bar-visible {
+  padding-bottom: calc(var(--space-10) + var(--space-8) + var(--bottom-nav-height) + env(safe-area-inset-bottom));
+}
+
 .tasks-filters {
   gap: var(--space-2);
   padding-bottom: 2px;
@@ -146,12 +154,16 @@
   position: fixed;
   left: 0;
   right: 0;
-  bottom: var(--bottom-nav-height);
+  /* .bottom-nav's OWN rendered height is var(--bottom-nav-height) PLUS
+     its own env(safe-area-inset-bottom) padding (see BottomNav.css) —
+     using only --bottom-nav-height here left this bar overlapping the
+     safe-area strip of the nav on iPhones with a home indicator. */
+  bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
   z-index: 45;
   display: flex;
   justify-content: center;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-5);
+  padding: var(--space-4) var(--space-5);
   background: var(--color-surface);
   border-top: 1px solid var(--color-border-soft);
   box-shadow: 0 -4px 16px rgba(15, 18, 38, 0.06);
