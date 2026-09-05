@@ -381,6 +381,54 @@ export async function createTaskOccurrenceOverride(
  * tied to it (a reminder, for instance) stays correctly attached
  * throughout.
  */
+/**
+ * Moves ONE occurrence of a recurring series to `newDate` by detaching it
+ * into a fully standalone, non-recurring task.
+ *
+ * IDEMPOTENCY (corrected — see chat report): the identity used to detect
+ * "has this already been done" must be something that survives the
+ * operation's OWN final step. An earlier version used the transient
+ * (recurrence_parent_id, recurrence_occurrence_date) pair — but step 5
+ * below clears exactly those two fields on success, so a retry after a
+ * successful detach (triggered by, say, a later reminder-application
+ * failure, or a lost network response) could no longer find the row it
+ * had already created, and would insert a second standalone task.
+ *
+ * This uses PERMANENT provenance columns instead — detached_from_parent_id
+ * / detached_from_occurrence_date (see 0012_task_archiving.sql) — which
+ * are set once and never cleared, independent of the transient
+ * recurrence_* pair that only reflects an occurrence's CURRENT slot.
+ *
+ * Sequence:
+ *   1. Look up an existing task by the PERMANENT provenance pair — this
+ *      is the authoritative "already detached (fully or partially)"
+ *      check, and is what makes a retry after ANY point of failure land
+ *      on the same row.
+ *   2. If none, look up an existing task by the TRANSIENT
+ *      recurrence_parent_id/occurrence_date pair instead — this is a
+ *      pre-existing "This occurrence" override that predates any move
+ *      attempt; it gets reused (tagged with the provenance pair) rather
+ *      than creating a second row for the same slot.
+ *   3. If neither exists, insert exactly one row carrying BOTH pairs at
+ *      once. A unique index on the provenance pair means a
+ *      concurrent/retried insert can only ever collide (23505), never
+ *      silently duplicate — on collision, re-fetch by the provenance
+ *      pair and continue with that row instead of failing or inserting
+ *      again.
+ *   4. Remove the original occurrence from the series (skipTaskOccurrence
+ *      — already idempotent).
+ *   5. Clear ONLY recurrence_parent_id/recurrence_occurrence_date — never
+ *      detached_from_*, which stays set permanently. Clearing
+ *      recurrence_parent_id is required for this to actually become
+ *      standalone: expandTaskOccurrences treats ANY row with that field
+ *      set as an override still positioned in its original series slot.
+ *
+ * The row's id never changes across this process (steps 1-3 always
+ * resolve to, create, or reuse exactly one row before any mutation that
+ * matters), so anything already tied to it (a reminder, for instance)
+ * stays correctly attached throughout, and every step past the first
+ * successful resolution of that id is naturally idempotent to repeat.
+ */
 export async function detachTaskOccurrenceToDate(
   userId: string,
   seriesId: string,
@@ -388,15 +436,6 @@ export async function detachTaskOccurrenceToDate(
   newDate: string,
   effectiveFields: TaskInput,
 ): Promise<Task> {
-  const { data: existing, error: findError } = await supabase
-    .from('tasks')
-    .select('id')
-    .eq('recurrence_parent_id', seriesId)
-    .eq('recurrence_occurrence_date', occurrenceDate)
-    .maybeSingle();
-
-  if (findError) throw toSupabaseError('Could not move this occurrence', findError);
-
   const fields = {
     title: effectiveFields.title.trim(),
     description: effectiveFields.description?.trim() || null,
@@ -407,26 +446,76 @@ export async function detachTaskOccurrenceToDate(
     estimated_duration_minutes: effectiveFields.estimatedMinutes ?? null,
   };
 
-  let taskId: string;
-  if (existing) {
-    const { error } = await supabase.from('tasks').update(fields).eq('id', existing.id);
-    if (error) throw toSupabaseError('Could not move this occurrence', error);
-    taskId = existing.id;
-  } else {
+  async function findByProvenance(): Promise<string | null> {
     const { data, error } = await supabase
       .from('tasks')
-      .insert({
-        user_id: userId,
-        ...fields,
-        recurrence_type: 'none',
-        recurrence_parent_id: seriesId,
-        recurrence_occurrence_date: occurrenceDate,
-      })
       .select('id')
-      .single();
+      .eq('detached_from_parent_id', seriesId)
+      .eq('detached_from_occurrence_date', occurrenceDate)
+      .maybeSingle();
     if (error) throw toSupabaseError('Could not move this occurrence', error);
-    taskId = (data as { id: string }).id;
+    return data?.id ?? null;
   }
+
+  let taskId = await findByProvenance();
+
+  if (taskId) {
+    // Already detached (fully or partially) by a previous attempt —
+    // just make sure its fields reflect the latest requested move, then
+    // continue to the remaining (idempotent) steps.
+    const { error } = await supabase.from('tasks').update(fields).eq('id', taskId);
+    if (error) throw toSupabaseError('Could not move this occurrence', error);
+  } else {
+    const { data: existingOverride, error: overrideFindError } = await supabase
+      .from('tasks')
+      .select('id')
+      .eq('recurrence_parent_id', seriesId)
+      .eq('recurrence_occurrence_date', occurrenceDate)
+      .maybeSingle();
+    if (overrideFindError) throw toSupabaseError('Could not move this occurrence', overrideFindError);
+
+    if (existingOverride) {
+      const { error } = await supabase
+        .from('tasks')
+        .update({ ...fields, detached_from_parent_id: seriesId, detached_from_occurrence_date: occurrenceDate })
+        .eq('id', existingOverride.id);
+      if (error) throw toSupabaseError('Could not move this occurrence', error);
+      taskId = existingOverride.id;
+    } else {
+      const { data, error } = await supabase
+        .from('tasks')
+        .insert({
+          user_id: userId,
+          ...fields,
+          recurrence_type: 'none',
+          recurrence_parent_id: seriesId,
+          recurrence_occurrence_date: occurrenceDate,
+          detached_from_parent_id: seriesId,
+          detached_from_occurrence_date: occurrenceDate,
+        })
+        .select('id')
+        .single();
+
+      if (error) {
+        // 23505 = unique_violation on tasks_detached_from_unique — a
+        // concurrent or retried attempt already won this exact detach
+        // between our check above and this insert. Re-fetch by the same
+        // provenance pair and continue with THAT row rather than
+        // failing or inserting a duplicate.
+        if (error.code === '23505') {
+          const raceWinnerId = await findByProvenance();
+          if (!raceWinnerId) throw toSupabaseError('Could not move this occurrence', error);
+          taskId = raceWinnerId;
+        } else {
+          throw toSupabaseError('Could not move this occurrence', error);
+        }
+      } else {
+        taskId = (data as { id: string }).id;
+      }
+    }
+  }
+
+  if (!taskId) throw new Error('Could not resolve the detached task for this occurrence.');
 
   await skipTaskOccurrence(userId, seriesId, occurrenceDate);
 

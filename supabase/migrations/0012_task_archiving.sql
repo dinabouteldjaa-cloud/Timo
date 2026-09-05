@@ -70,6 +70,73 @@ where r.remind_at <= now()
 revoke all on public.due_unsent_reminders from anon, authenticated;
 grant select on public.due_unsent_reminders to service_role;
 
+-- ----------------------------------------------------------------------------
+-- Move-To idempotency for recurring occurrences (correction — see chat
+-- report: the first version of this used the TRANSIENT
+-- (recurrence_parent_id, recurrence_occurrence_date) pair as its
+-- idempotency key, but the detach operation's own final step clears
+-- exactly those two fields — so after a successful detach, a retry
+-- (e.g. triggered by a later, unrelated reminder-application failure, or
+-- a lost network response) could no longer find the row it had already
+-- created, and would insert a second standalone task).
+--
+-- These are PERMANENT provenance fields, never cleared once set — a
+-- record of "this standalone task originated from detaching this
+-- specific occurrence", independent of the transient recurrence_* pair
+-- that only reflects an occurrence's CURRENT slot while it's still
+-- attached. They are NOT recurrence fields and do not participate in
+-- expandTaskOccurrences/occurrence resolution at all — only
+-- detachTaskOccurrenceToDate reads or writes them.
+-- ----------------------------------------------------------------------------
+
+-- detached_from_parent_id is DELIBERATELY a plain uuid with NO foreign
+-- key to tasks(id) — this is historical/idempotency metadata, not an
+-- active relationship. An earlier version added `references
+-- public.tasks (id) on delete set null`, but that conflicts with the
+-- paired-nullability CHECK below: deleting the original recurring
+-- series would have cleared ONLY detached_from_parent_id (via the FK's
+-- own ON DELETE action) while leaving detached_from_occurrence_date
+-- populated, violating the CHECK and potentially making the series
+-- delete itself fail. A plain, unconstrained column has no such action
+-- to fire, so deleting the original series never touches this pair at
+-- all — it stays fully populated, which is exactly what's needed: the
+-- provenance identity must survive the original series being deleted,
+-- both to remain historically accurate and to keep working as the
+-- permanent idempotency key detachTaskOccurrenceToDate relies on.
+alter table public.tasks add column if not exists detached_from_parent_id uuid;
+alter table public.tasks add column if not exists detached_from_occurrence_date date;
+
+-- detached_from_parent_id and detached_from_occurrence_date form ONE
+-- logical identity — a row is either not-detached-from-anything (both
+-- NULL) or it records exactly which occurrence it came from (both set);
+-- one populated without the other is meaningless and would break the
+-- provenance lookup detachTaskOccurrenceToDate relies on. Same
+-- defensive style already used for recurrence_parent_id /
+-- recurrence_occurrence_date above.
+do $$
+begin
+  alter table public.tasks
+    add constraint tasks_detached_from_fields_paired
+    check ((detached_from_parent_id is null) = (detached_from_occurrence_date is null));
+exception
+  when duplicate_object then null;
+end $$;
+
+-- One original recurring occurrence can map to at most one detached
+-- task. This is what the fixed detachTaskOccurrenceToDate checks FIRST,
+-- before ever considering an insert — and what a concurrent/retried
+-- attempt's insert collides against (23505) if another attempt already
+-- won the race, so it can re-fetch and continue instead of duplicating.
+-- The predicate requires BOTH fields non-null (not just the parent id)
+-- so it precisely matches the complete provenance identity the paired
+-- CHECK constraint above guarantees — with that constraint in place the
+-- two predicates are equivalent, but this reads correctly as "a complete
+-- provenance record" on its own rather than relying on the reader to
+-- know the CHECK constraint exists elsewhere.
+create unique index if not exists tasks_detached_from_unique
+  on public.tasks (detached_from_parent_id, detached_from_occurrence_date)
+  where detached_from_parent_id is not null and detached_from_occurrence_date is not null;
+
 -- ============================================================================
 -- End of migration.
 -- ============================================================================
