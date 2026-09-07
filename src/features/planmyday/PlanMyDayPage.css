@@ -114,15 +114,26 @@
 }
 
 .plan-block__time-display {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   border: none;
   background: none;
   padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.plan-block__time-display-text {
   font-size: 14px;
   font-weight: 700;
   color: var(--color-text);
   font-variant-numeric: tabular-nums;
-  cursor: pointer;
-  text-align: left;
+}
+
+.plan-block__time-edit-icon {
+  flex-shrink: 0;
+  color: var(--color-text-faint);
 }
 
 .plan-block__time-done {

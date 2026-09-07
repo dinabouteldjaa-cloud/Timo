@@ -34,6 +34,10 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_TASKS = 20;
 const MAX_EVENTS = 20;
 const MAX_SCHEDULED_BLOCKS = 20;
+// Minimum breathing room required between two scheduled TASKS, and
+// between a task and an immovable fixed event — enforced server-side
+// (never left to the AI alone to honor), see the validation loop below.
+const MIN_GAP_MINUTES = 5;
 
 interface InputTask {
   id: string;
@@ -77,8 +81,16 @@ function minutesToTime(mins: number): string {
   return `${String(Math.floor(wrapped / 60)).padStart(2, '0')}:${String(wrapped % 60).padStart(2, '0')}`;
 }
 
-function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
-  return aStart < bEnd && bStart < aEnd;
+/**
+ * True if window B does not maintain at least MIN_GAP_MINUTES of
+ * separation from window A. This subsumes plain overlap (an overlap is
+ * just a "gap" of zero or negative), so the SAME check is used for both
+ * task-vs-task and task-vs-fixed-event validation below — one rule,
+ * applied consistently, rather than a stricter rule for one case and a
+ * looser one for the other.
+ */
+function tooClose(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
+  return aStart < bEnd + MIN_GAP_MINUTES && bStart < aEnd + MIN_GAP_MINUTES;
 }
 
 const PLAN_JSON_SCHEMA = {
@@ -130,10 +142,11 @@ Rules:
 - Only reference tasks by the exact "id" values given to you. Never invent a task or an id.
 - Never propose a task time that overlaps any event in "events" (for events with a startTime/endTime). Ignore all-day events for time-blocking purposes.
 - Never propose two tasks with overlapping times.
+- Every scheduled task must have AT LEAST a 5-minute gap from every other scheduled task, and AT LEAST a 5-minute gap from every fixed event with a startTime/endTime — this is a hard minimum, not a suggestion, and applies on BOTH sides of an event (a task ending right before an event, and a task starting right after one, each still need their own 5-minute buffer from it). For example, with an event from 18:00-19:00: a task must end by 17:55 at the latest, and any task after it must start at 19:05 at the earliest.
+- Account for these 5-minute gaps when deciding how many tasks realistically fit today — they take up real time between blocks, not just the tasks' own durations.
 - Never propose a start time before ${earliestStart} today — this is a hard floor, not a suggestion.
 - Use each task's estimatedMinutes for its duration when provided. If missing, propose a reasonable duration yourself (commonly 15-60 minutes depending on the task) and set estimatedDuration: true for that item; set it false when you used the task's own estimatedMinutes.
 - Respect priority as a general guide, but use good judgment about order - timing/context can reasonably outweigh priority.
-- Leave a short buffer between blocks where sensible (a few minutes); don't schedule back-to-back all day.
 - Do not overpack the day. If not everything realistically fits before a reasonable end to the day, put the remaining task ids in "unscheduled" with a brief reason instead of inventing impossible times.
 - Every task id you were given must appear in either "scheduled" or "unscheduled" - never drop one silently.
 - startTime and endTime must be 24-hour "HH:MM", with endTime after startTime.
@@ -371,12 +384,12 @@ Deno.serve(async (req) => {
       rejectToUnscheduled(taskId, 'That time has already passed.');
       continue;
     }
-    if (fixedEventWindows.some((w) => overlaps(start, end, w.start, w.end))) {
-      rejectToUnscheduled(taskId, 'Conflicts with an event on your calendar.');
+    if (fixedEventWindows.some((w) => tooClose(start, end, w.start, w.end))) {
+      rejectToUnscheduled(taskId, 'Needs at least 5 minutes of buffer around an event on your calendar.');
       continue;
     }
-    if (acceptedBlocks.some((b) => overlaps(start, end, b.start, b.end))) {
-      rejectToUnscheduled(taskId, 'Overlapped another proposed task.');
+    if (acceptedBlocks.some((b) => tooClose(start, end, b.start, b.end))) {
+      rejectToUnscheduled(taskId, 'Needs at least a 5-minute gap from another scheduled task.');
       continue;
     }
     if (acceptedBlocks.length >= MAX_SCHEDULED_BLOCKS) {

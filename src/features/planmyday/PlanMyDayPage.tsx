@@ -429,7 +429,30 @@ export default function PlanMyDayPage() {
                             onClick={() => setEditingBlockId(item.block.taskId)}
                             aria-label="Edit time"
                           >
-                            {item.block.startTime} – {item.block.endTime}
+                            <span className="plan-block__time-display-text">
+                              {item.block.startTime} – {item.block.endTime}
+                            </span>
+                            {/* Same pencil icon already used for TaskRow's
+                                swipe-to-edit action — reused here, not a
+                                new icon, so tapping the small icon or the
+                                time text both trigger the SAME button and
+                                the SAME edit-mode handler. */}
+                            <svg
+                              className="plan-block__time-edit-icon"
+                              width="13"
+                              height="13"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              aria-hidden="true"
+                            >
+                              <path
+                                d="M4 20l1.1-4.4a2 2 0 01.53-.95L15.6 4.68a1.9 1.9 0 012.69 0l1.03 1.03a1.9 1.9 0 010 2.69L9.35 18.37a2 2 0 01-.95.53L4 20z"
+                                stroke="currentColor"
+                                strokeWidth="1.7"
+                                strokeLinejoin="round"
+                              />
+                              <path d="M13.5 6.5l4 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                            </svg>
                           </button>
                         )}
                         <div className="plan-block__body">
