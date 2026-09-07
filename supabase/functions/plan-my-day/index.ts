@@ -72,6 +72,11 @@ function toMinutes(time: string): number {
   return h * 60 + m;
 }
 
+function minutesToTime(mins: number): string {
+  const wrapped = ((mins % (24 * 60)) + 24 * 60) % (24 * 60);
+  return `${String(Math.floor(wrapped / 60)).padStart(2, '0')}:${String(wrapped % 60).padStart(2, '0')}`;
+}
+
 function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
   return aStart < bEnd && bStart < aEnd;
 }
@@ -114,10 +119,10 @@ const PLAN_JSON_SCHEMA = {
   },
 } as const;
 
-function buildSystemPrompt(localDate: string, localTime: string): string {
+function buildSystemPrompt(localDate: string, localTime: string, earliestStart: string): string {
   return `You are a scheduling assistant for Timo, a task and calendar app. You propose a SUGGESTED schedule only — you never modify anything directly.
 
-Today is ${localDate}. The current local time is ${localTime}. Never propose a start time earlier than the current local time.
+Today is ${localDate}. The current local time is ${localTime}. The user needs a few minutes to review this plan before accepting it, so the EARLIEST allowed start time for anything you schedule is ${earliestStart} — never ${localTime} itself. This buffer is fixed and already accounts for review time; do not add any additional buffer before the first task on top of it.
 
 You will receive a JSON object with "tasks" (incomplete tasks to consider) and "events" (fixed, immovable calendar commitments already on the schedule today).
 
@@ -125,7 +130,7 @@ Rules:
 - Only reference tasks by the exact "id" values given to you. Never invent a task or an id.
 - Never propose a task time that overlaps any event in "events" (for events with a startTime/endTime). Ignore all-day events for time-blocking purposes.
 - Never propose two tasks with overlapping times.
-- Never propose a time before ${localTime} today.
+- Never propose a start time before ${earliestStart} today — this is a hard floor, not a suggestion.
 - Use each task's estimatedMinutes for its duration when provided. If missing, propose a reasonable duration yourself (commonly 15-60 minutes depending on the task) and set estimatedDuration: true for that item; set it false when you used the task's own estimatedMinutes.
 - Respect priority as a general guide, but use good judgment about order - timing/context can reasonably outweigh priority.
 - Leave a short buffer between blocks where sensible (a few minutes); don't schedule back-to-back all day.
@@ -135,7 +140,7 @@ Rules:
 - Return ONLY the JSON object matching the required shape - no prose, no markdown fences.`;
 }
 
-async function callGroq(apiKey: string, payload: unknown, localDate: string, localTime: string) {
+async function callGroq(apiKey: string, payload: unknown, localDate: string, localTime: string, earliestStart: string) {
   const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -148,7 +153,7 @@ async function callGroq(apiKey: string, payload: unknown, localDate: string, loc
       reasoning_effort: 'low',
       response_format: { type: 'json_schema', json_schema: PLAN_JSON_SCHEMA },
       messages: [
-        { role: 'system', content: buildSystemPrompt(localDate, localTime) },
+        { role: 'system', content: buildSystemPrompt(localDate, localTime, earliestStart) },
         { role: 'user', content: JSON.stringify(payload) },
       ],
     }),
@@ -202,7 +207,7 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: 'Not authenticated' }, 401);
   }
 
-  let body: { localDate?: unknown; localTime?: unknown; tasks?: unknown; events?: unknown };
+  let body: { localDate?: unknown; localTime?: unknown; earliestStart?: unknown; tasks?: unknown; events?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -215,6 +220,19 @@ Deno.serve(async (req) => {
       : new Date().toISOString().slice(0, 10);
   const localTime =
     typeof body.localTime === 'string' && TIME_RE.test(body.localTime) ? body.localTime : '09:00';
+
+  // Server's OWN deterministic floor, computed independently from
+  // localTime using the exact same formula the client uses (see
+  // planMyDayApi.computeEarliestStart). This is the authoritative
+  // minimum — a client-supplied earliestStart is only ever allowed to
+  // push the floor LATER (stricter), never earlier. A malformed or
+  // malicious client value earlier than this is simply not trusted.
+  const serverFloorMinutes = Math.ceil((toMinutes(localTime) + 10) / 5) * 5;
+  const clientEarliestStartMinutes =
+    typeof body.earliestStart === 'string' && TIME_RE.test(body.earliestStart)
+      ? toMinutes(body.earliestStart)
+      : serverFloorMinutes;
+  const earliestStartMinutes = Math.max(serverFloorMinutes, clientEarliestStartMinutes);
 
   const inputTasks: InputTask[] = Array.isArray(body.tasks)
     ? (body.tasks as InputTask[])
@@ -231,6 +249,21 @@ Deno.serve(async (req) => {
   if (inputTasks.length === 0) {
     return jsonResponse({ scheduled: [], unscheduled: [] });
   }
+
+  // No valid same-day scheduling window remains (mirrors
+  // planMyDayApi.computeEarliestStart's client-side check — Plan My Day
+  // only ever schedules within the CURRENT localDate, so a floor at or
+  // past 24:00 has no valid same-day meaning). This is deterministic, so
+  // return it directly rather than spending an AI call on a request that
+  // could only ever come back empty.
+  if (earliestStartMinutes >= 24 * 60) {
+    return jsonResponse({
+      scheduled: [],
+      unscheduled: inputTasks.map((t) => ({ taskId: t.id, reason: 'Not enough time left today.' })),
+    });
+  }
+
+  const earliestStart = minutesToTime(earliestStartMinutes);
 
   const apiKey = Deno.env.get('GROQ_API_KEY');
   if (!apiKey) {
@@ -267,6 +300,7 @@ Deno.serve(async (req) => {
       },
       localDate,
       localTime,
+      earliestStart,
     );
   } catch (err) {
     // eslint-disable-next-line no-console
@@ -293,7 +327,6 @@ Deno.serve(async (req) => {
 
   // --- Treat the model's output as fully untrusted from here on ---------
   const validTaskIds = new Set(inputTasks.map((t) => t.id));
-  const nowMinutes = toMinutes(localTime);
 
   const fixedEventWindows = inputEvents
     .filter((e) => !e.allDay && isValidTime(e.startTime) && isValidTime(e.endTime))
@@ -334,7 +367,7 @@ Deno.serve(async (req) => {
       rejectToUnscheduled(taskId, "Timo couldn't confirm a valid time for this.");
       continue;
     }
-    if (start < nowMinutes) {
+    if (start < earliestStartMinutes) {
       rejectToUnscheduled(taskId, 'That time has already passed.');
       continue;
     }
@@ -380,9 +413,6 @@ Deno.serve(async (req) => {
   }
 
   acceptedBlocks.sort((a, b) => a.start - b.start);
-
-  const minutesToTime = (mins: number) =>
-    `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
 
   const scheduled: PlannedBlock[] = acceptedBlocks.map((b) => ({
     taskId: b.taskId,

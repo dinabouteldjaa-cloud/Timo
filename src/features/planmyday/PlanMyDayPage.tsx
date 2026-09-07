@@ -65,6 +65,11 @@ export default function PlanMyDayPage() {
   const [unscheduled, setUnscheduled] = useState<UnscheduledTask[]>([]);
   const [resultMessage, setResultMessage] = useState<string | null>(null);
   const [showAllUnscheduled, setShowAllUnscheduled] = useState(false);
+  // Which single block (by taskId) is currently showing its native time
+  // inputs for editing — null means every block shows the clean,
+  // read-only 24-hour range instead. Only one block can be in edit mode
+  // at a time.
+  const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const hasStartedRef = useRef(false);
 
   // Fix (review): a non-recurring, non-override task must be undated,
@@ -110,6 +115,7 @@ export default function PlanMyDayPage() {
     setStep('loading');
     setErrorMessage(null);
     setShowAllUnscheduled(false);
+    setEditingBlockId(null);
 
     if (todaysTasks.length === 0 && todaysEvents.length === 0) {
       setStep('empty');
@@ -387,35 +393,45 @@ export default function PlanMyDayPage() {
                     if (!task) return null;
                     return (
                       <div key={`task-${item.block.taskId}`} className="plan-block">
-                        <div className="plan-block__times">
-                          <div className="plan-block__time-inputs">
-                            <input
-                              type="time"
-                              lang="en-GB"
-                              className="plan-block__time-input"
-                              value={item.block.startTime}
-                              onChange={(e) => updateBlockTime(item.block.taskId, 'startTime', e.target.value)}
-                            />
-                            <span className="plan-block__time-sep">–</span>
-                            <input
-                              type="time"
-                              lang="en-GB"
-                              className="plan-block__time-input"
-                              value={item.block.endTime}
-                              onChange={(e) => updateBlockTime(item.block.taskId, 'endTime', e.target.value)}
-                            />
+                        {editingBlockId === item.block.taskId ? (
+                          <div className="plan-block__times">
+                            <div className="plan-block__time-inputs">
+                              <input
+                                type="time"
+                                lang="en-GB"
+                                autoFocus
+                                className="plan-block__time-input"
+                                value={item.block.startTime}
+                                onChange={(e) => updateBlockTime(item.block.taskId, 'startTime', e.target.value)}
+                              />
+                              <span className="plan-block__time-sep">–</span>
+                              <input
+                                type="time"
+                                lang="en-GB"
+                                className="plan-block__time-input"
+                                value={item.block.endTime}
+                                onChange={(e) => updateBlockTime(item.block.taskId, 'endTime', e.target.value)}
+                              />
+                              <button
+                                type="button"
+                                className="plan-block__time-done"
+                                onClick={() => setEditingBlockId(null)}
+                                aria-label="Done editing time"
+                              >
+                                ✓
+                              </button>
+                            </div>
                           </div>
-                          {/* Native <input type="time"> pickers can render
-                              AM/PM on some browsers/OS regardless of the
-                              lang hint above (notably iOS Safari, which
-                              follows the device's own system setting) — this
-                              plain-text readout is always exactly the
-                              underlying 24-hour value, guaranteeing an
-                              unambiguous visible confirmation either way. */}
-                          <span className="plan-block__time-readout">
-                            {item.block.startTime}–{item.block.endTime}
-                          </span>
-                        </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="plan-block__time-display"
+                            onClick={() => setEditingBlockId(item.block.taskId)}
+                            aria-label="Edit time"
+                          >
+                            {item.block.startTime} – {item.block.endTime}
+                          </button>
+                        )}
                         <div className="plan-block__body">
                           <p className="plan-block__title">{task.title}</p>
                           <div className="plan-block__meta">
