@@ -40,6 +40,11 @@ const en = {
     noTasksToday: 'Nothing scheduled yet',
     noTasksTodaySubtitle: 'Add a task or let Timo plan your day.',
   },
+  planMyDay: {
+    timoEstimate: 'Timo estimate',
+    showMore: 'Show {count} more',
+    showLess: 'Show less',
+  },
   profile: {
     preferences: 'Preferences',
     firstDayOfWeek: 'First day of week',

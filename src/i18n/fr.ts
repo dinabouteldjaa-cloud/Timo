@@ -37,6 +37,11 @@ const fr: Strings = {
     noTasksToday: 'Rien de prévu pour l’instant',
     noTasksTodaySubtitle: 'Ajoutez une tâche ou laissez Timo planifier votre journée.',
   },
+  planMyDay: {
+    timoEstimate: 'Estimation de Timo',
+    showMore: '{count} de plus',
+    showLess: 'Afficher moins',
+  },
   profile: {
     preferences: 'Préférences',
     firstDayOfWeek: 'Premier jour de la semaine',

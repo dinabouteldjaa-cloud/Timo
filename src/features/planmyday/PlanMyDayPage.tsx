@@ -7,8 +7,9 @@ import Badge from '../../components/ui/Badge';
 import EmptyState from '../../components/ui/EmptyState';
 import TimoMascot from '../../components/ui/TimoMascot';
 import { useAppState, type NewTaskInput } from '../../state/AppStateContext';
+import { useLocale, formatString } from '../../i18n/LocaleContext';
 import { planMyDay } from '../../lib/planMyDayApi';
-import { toISODate } from '../../lib/utils';
+import { toISODate, formatDuration } from '../../lib/utils';
 import { isDateAnOccurrence, expandEventOccurrences } from '../../lib/occurrences';
 import { computeRemindAt } from '../../lib/reminderPresets';
 import type { PlannedTaskBlock, UnscheduledTask } from '../../types/planMyDay';
@@ -28,12 +29,23 @@ function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number): b
   return aStart < bEnd && bStart < aEnd;
 }
 
+/** Duration in minutes derived from a block's own proposed start/end — used for the visible duration badge, never persisted. */
+function blockDurationMinutes(startTime: string, endTime: string): number {
+  return Math.max(0, toMinutes(endTime) - toMinutes(startTime));
+}
+
+// How many Unscheduled items to show before collapsing the rest behind
+// "Show N more" — keeps a long list from dominating the screen while
+// still surfacing every item's own reason on request.
+const UNSCHEDULED_VISIBLE_DEFAULT = 5;
+
 interface EditableBlock extends PlannedTaskBlock {
   removed: boolean;
 }
 
 export default function PlanMyDayPage() {
   const navigate = useNavigate();
+  const { t } = useLocale();
   const {
     tasks,
     events,
@@ -52,35 +64,14 @@ export default function PlanMyDayPage() {
   const [blocks, setBlocks] = useState<EditableBlock[]>([]);
   const [unscheduled, setUnscheduled] = useState<UnscheduledTask[]>([]);
   const [resultMessage, setResultMessage] = useState<string | null>(null);
+  const [showAllUnscheduled, setShowAllUnscheduled] = useState(false);
   const hasStartedRef = useRef(false);
 
-  // Same eligibility as Today's "Today's Tasks" section: any incomplete
-  // task, with NO due-date restriction — Today itself doesn't filter by
-  // due date (see TodayPage.tsx's `todaysTasks`), so a task with no due
-  // date, or one due on a different day, is still shown there and must
-  // stay eligible for planning here too. (Today additionally caps its
-  // list to 4 items for display — that's a compact-card display limit,
-  // not part of the "is this eligible today" definition, so it's not
-  // applied here.)
-  //
-  // Tasks already scheduled for today are still included here on purpose:
-  // Plan My Day may propose a new placement for them, but nothing changes
-  // until Accept — accepting simply overwrites today's old block for that
-  // task with the newly accepted one (setTaskSchedule is a plain update).
-  //
-  // Recurring series parents are a special case (added alongside
-  // recurring tasks/events — see 0011_recurring_tasks_events.sql): a
-  // series parent's own `status` never reflects per-occurrence
-  // completion (that lives in a separate table), so without this check a
-  // "Gym every Monday" task would appear as a planning candidate every
-  // single day, not just Mondays. A series parent is only included when
-  // today is genuinely one of its occurrences, and not already
-  // completed/removed for today specifically. Occurrence OVERRIDE rows
-  // (recurrenceParentId set) must only be eligible on their OWN actual
-  // occurrence date (fix, review item 10) — without this check, an
-  // override created for, say, next Monday would incorrectly appear in
-  // TODAY's candidate list too, since an override's own `status` never
-  // implies which date it belongs to on its own.
+  // Fix (review): a non-recurring, non-override task must be undated,
+  // overdue, or due TODAY to be a candidate — never a future date. Plan
+  // My Day plans today's remaining hours specifically; a task due next
+  // week has no business competing for today's schedule. This does not
+  // touch due_date at all — it's purely a candidate-selection filter.
   const todaysTasks = useMemo(
     () =>
       tasks.filter((task) => {
@@ -91,8 +82,10 @@ export default function PlanMyDayPage() {
           if (!isDateAnOccurrence(task, TODAY_ISO)) return false;
           const key = `${task.id}::${TODAY_ISO}`;
           if (taskOccurrenceCompletions.has(key) || taskOccurrenceSkips.has(key)) return false;
+          return true;
         }
-        return true;
+        if (!task.dueDate) return true; // undated — always eligible
+        return task.dueDate <= TODAY_ISO; // overdue or due today — never future
       }),
     [tasks, taskOccurrenceCompletions, taskOccurrenceSkips],
   );
@@ -116,6 +109,7 @@ export default function PlanMyDayPage() {
   async function runPlan() {
     setStep('loading');
     setErrorMessage(null);
+    setShowAllUnscheduled(false);
 
     if (todaysTasks.length === 0 && todaysEvents.length === 0) {
       setStep('empty');
@@ -375,7 +369,11 @@ export default function PlanMyDayPage() {
                       return (
                         <div key={`event-${event.id}`} className="plan-block plan-block--fixed">
                           <div className="plan-block__time">
-                            {event.allDay ? 'All day' : event.startTime ?? ''}
+                            {event.allDay
+                              ? 'All day'
+                              : event.startTime && event.endTime
+                                ? `${event.startTime}–${event.endTime}`
+                                : event.startTime ?? ''}
                           </div>
                           <div className="plan-block__body">
                             <p className="plan-block__title">{event.title}</p>
@@ -390,27 +388,47 @@ export default function PlanMyDayPage() {
                     return (
                       <div key={`task-${item.block.taskId}`} className="plan-block">
                         <div className="plan-block__times">
-                          <input
-                            type="time"
-                            className="plan-block__time-input"
-                            value={item.block.startTime}
-                            onChange={(e) => updateBlockTime(item.block.taskId, 'startTime', e.target.value)}
-                          />
-                          <span className="plan-block__time-sep">–</span>
-                          <input
-                            type="time"
-                            className="plan-block__time-input"
-                            value={item.block.endTime}
-                            onChange={(e) => updateBlockTime(item.block.taskId, 'endTime', e.target.value)}
-                          />
+                          <div className="plan-block__time-inputs">
+                            <input
+                              type="time"
+                              lang="en-GB"
+                              className="plan-block__time-input"
+                              value={item.block.startTime}
+                              onChange={(e) => updateBlockTime(item.block.taskId, 'startTime', e.target.value)}
+                            />
+                            <span className="plan-block__time-sep">–</span>
+                            <input
+                              type="time"
+                              lang="en-GB"
+                              className="plan-block__time-input"
+                              value={item.block.endTime}
+                              onChange={(e) => updateBlockTime(item.block.taskId, 'endTime', e.target.value)}
+                            />
+                          </div>
+                          {/* Native <input type="time"> pickers can render
+                              AM/PM on some browsers/OS regardless of the
+                              lang hint above (notably iOS Safari, which
+                              follows the device's own system setting) — this
+                              plain-text readout is always exactly the
+                              underlying 24-hour value, guaranteeing an
+                              unambiguous visible confirmation either way. */}
+                          <span className="plan-block__time-readout">
+                            {item.block.startTime}–{item.block.endTime}
+                          </span>
                         </div>
                         <div className="plan-block__body">
                           <p className="plan-block__title">{task.title}</p>
                           <div className="plan-block__meta">
                             <Badge tone="neutral">{task.category}</Badge>
                             <Badge tone={task.priority}>{task.priority}</Badge>
-                            {item.block.estimatedDuration && (
-                              <Badge tone="medium">Estimated duration</Badge>
+                            {item.block.estimatedDuration ? (
+                              <Badge tone="medium">
+                                {t.planMyDay.timoEstimate} · {formatDuration(blockDurationMinutes(item.block.startTime, item.block.endTime), t)}
+                              </Badge>
+                            ) : (
+                              <Badge tone="neutral">
+                                {formatDuration(blockDurationMinutes(item.block.startTime, item.block.endTime), t)}
+                              </Badge>
                             )}
                           </div>
                         </div>
@@ -433,19 +451,34 @@ export default function PlanMyDayPage() {
               <div className="plan-my-day-timeline">
                 <p className="plan-my-day-section-label">Unscheduled</p>
                 <Card padding="none">
-                  {unscheduled.map((item) => {
-                    const task = taskFor(item.taskId);
-                    if (!task) return null;
-                    return (
-                      <div key={item.taskId} className="plan-block plan-block--unscheduled">
-                        <div className="plan-block__body">
-                          <p className="plan-block__title">{task.title}</p>
-                          {item.reason && <p className="plan-block__reason">{item.reason}</p>}
+                  {(showAllUnscheduled ? unscheduled : unscheduled.slice(0, UNSCHEDULED_VISIBLE_DEFAULT)).map(
+                    (item) => {
+                      const task = taskFor(item.taskId);
+                      if (!task) return null;
+                      return (
+                        <div key={item.taskId} className="plan-block plan-block--unscheduled">
+                          <div className="plan-block__body">
+                            <p className="plan-block__title">{task.title}</p>
+                            {item.reason && <p className="plan-block__reason">{item.reason}</p>}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    },
+                  )}
                 </Card>
+                {unscheduled.length > UNSCHEDULED_VISIBLE_DEFAULT && (
+                  <button
+                    type="button"
+                    className="plan-my-day-unscheduled-toggle"
+                    onClick={() => setShowAllUnscheduled((prev) => !prev)}
+                  >
+                    {showAllUnscheduled
+                      ? t.planMyDay.showLess
+                      : formatString(t.planMyDay.showMore, {
+                          count: unscheduled.length - UNSCHEDULED_VISIBLE_DEFAULT,
+                        })}
+                  </button>
+                )}
               </div>
             )}
 

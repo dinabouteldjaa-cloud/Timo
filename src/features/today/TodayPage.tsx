@@ -7,7 +7,7 @@ import ProgressBar from '../../components/ui/ProgressBar';
 import TaskRow from '../../components/ui/TaskRow';
 import TimoMascot, { type TimoMascotVariant } from '../../components/ui/TimoMascot';
 import { useLocale, formatString } from '../../i18n/LocaleContext';
-import { getGreetingKey, formatFriendlyDate, toISODate } from '../../lib/utils';
+import { getGreetingKey, formatFriendlyDate, toISODate, formatTaskRowDateLabel } from '../../lib/utils';
 import { useAppState, type NewTaskInput } from '../../state/AppStateContext';
 import { expandTaskOccurrences } from '../../lib/occurrences';
 import { describeRecurrence } from '../../lib/recurrence';
@@ -305,6 +305,16 @@ export default function TodayPage() {
             <Card padding="sm">
               <div className="today-upnext">
                 <div className="today-upnext__time">
+                  {upcomingEvent.eventDate !== todayISO && (
+                    <span className="today-upnext__date">
+                      {formatTaskRowDateLabel(locale, upcomingEvent.eventDate, todayISO, {
+                        today: t.tasks.filterToday,
+                        tomorrow: t.tasks.tomorrow,
+                        yesterday: t.tasks.yesterday,
+                      })}
+                      {' · '}
+                    </span>
+                  )}
                   <span>{upcomingEvent.allDay ? 'All day' : upcomingEvent.startTime ?? ''}</span>
                 </div>
                 <div className="today-upnext__divider" />
