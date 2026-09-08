@@ -369,7 +369,7 @@ Deno.serve(async (req) => {
     const startTime = item.startTime;
     const endTime = item.endTime;
     if (!isValidTime(startTime) || !isValidTime(endTime)) {
-      rejectToUnscheduled(taskId, "Timo couldn't confirm a valid time for this.");
+      rejectToUnscheduled(taskId, 'Not enough time left today.');
       continue;
     }
 
@@ -377,11 +377,11 @@ Deno.serve(async (req) => {
     const end = toMinutes(endTime);
 
     if (end <= start) {
-      rejectToUnscheduled(taskId, "Timo couldn't confirm a valid time for this.");
+      rejectToUnscheduled(taskId, 'Not enough time left today.');
       continue;
     }
     if (start < earliestStartMinutes) {
-      rejectToUnscheduled(taskId, 'That time has already passed.');
+      rejectToUnscheduled(taskId, 'Not enough time left today.');
       continue;
     }
     if (fixedEventWindows.some((w) => tooClose(start, end, w.start, w.end))) {
