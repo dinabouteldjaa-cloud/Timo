@@ -11,7 +11,7 @@ import { useAppState, type NewTaskInput } from '../../state/AppStateContext';
 import { expandTaskOccurrences, resolveCompletedTaskOccurrences } from '../../lib/occurrences';
 import { describeRecurrence } from '../../lib/recurrence';
 import { computeRemindAt } from '../../lib/reminderPresets';
-import { toISODate, addDays, formatTaskRowDateLabel } from '../../lib/utils';
+import { toISODate, addDays, formatTaskRowDateLabel, compareByScheduledStartTime } from '../../lib/utils';
 import type { Reminder, Task } from '../../types/task';
 import AddTaskSheet from './AddTaskSheet';
 import TaskDetailsSheet from './TaskDetailsSheet';
@@ -252,7 +252,7 @@ export default function TasksPage() {
 
   const filtered: FilteredRow[] = useMemo(() => {
     if (filter === 'today') {
-      return occurrences
+      const todayOccurrenceRows: FilteredRow[] = occurrences
         .filter((occ) => occ.date === todayISO && !occ.completed)
         .map((occ) => ({
           row: occurrenceAsTask(occ),
@@ -260,6 +260,39 @@ export default function TasksPage() {
           occurrenceDate: occ.date,
           seriesId: occ.seriesId,
         }));
+
+      // Real underlying rows already represented above (an override's or
+      // series parent's actual id, not the synthetic display object) —
+      // used below purely to avoid a duplicate row for the same task.
+      const seenTaskIds = new Set(todayOccurrenceRows.map((r) => r.editTask.id));
+
+      // Fix (review): Plan My Day can schedule an overdue, undated, or
+      // otherwise-not-due-today NORMAL task onto today via scheduledDate,
+      // without ever changing that task's own dueDate (see
+      // resolveScheduleTargetId in PlanMyDayPage.tsx). TodayPage already
+      // treats this as "relevant to today" via its own isScheduledToday
+      // check; Tasks > Today now follows the same user-facing concept.
+      // Recurring occurrences and overrides are deliberately excluded
+      // here (recurrenceType === 'none' && !recurrenceParentId) — Plan
+      // My Day always schedules those via an occurrence override, which
+      // is already fully represented by todayOccurrenceRows above, so
+      // this only ever adds a genuinely standalone task, never a
+      // duplicate or a bypass of override semantics.
+      const scheduledTodayRows: FilteredRow[] = tasks
+        .filter(
+          (task) =>
+            task.recurrenceType === 'none' &&
+            !task.recurrenceParentId &&
+            task.status !== 'completed' &&
+            !task.archivedAt &&
+            task.scheduledDate === todayISO &&
+            !seenTaskIds.has(task.id),
+        )
+        .map((task) => ({ row: task, editTask: task }));
+
+      return [...todayOccurrenceRows, ...scheduledTodayRows].sort((a, b) =>
+        compareByScheduledStartTime(a.editTask, b.editTask, todayISO),
+      );
     }
     if (filter === 'overdue') {
       // Ordinary tasks and occurrence overrides (both have

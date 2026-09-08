@@ -7,7 +7,7 @@ import ProgressBar from '../../components/ui/ProgressBar';
 import TaskRow from '../../components/ui/TaskRow';
 import TimoMascot, { type TimoMascotVariant } from '../../components/ui/TimoMascot';
 import { useLocale, formatString } from '../../i18n/LocaleContext';
-import { getGreetingKey, formatFriendlyDate, toISODate, formatTaskRowDateLabel } from '../../lib/utils';
+import { getGreetingKey, formatFriendlyDate, toISODate, formatTaskRowDateLabel, compareByScheduledStartTime } from '../../lib/utils';
 import { useAppState, type NewTaskInput } from '../../state/AppStateContext';
 import { expandTaskOccurrences } from '../../lib/occurrences';
 import { describeRecurrence } from '../../lib/recurrence';
@@ -131,6 +131,14 @@ export default function TodayPage() {
       }
     }
 
+    // Chronological by Plan My Day's scheduled start time (today only —
+    // see compareByScheduledStartTime); tasks without one keep their
+    // existing relative order and sort after any scheduled ones. Sorted
+    // here, on the FULL list, before the completed-filter/slice(0,4)
+    // below — sorting after slicing would risk showing the wrong "first
+    // 4" if an earlier-scheduled task happened to land later in the
+    // unsorted list.
+    entries.sort((a, b) => compareByScheduledStartTime(a.task, b.task, todayISO));
     return entries;
   }, [todayOccurrences, tasks, todayISO]);
 

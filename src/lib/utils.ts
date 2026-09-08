@@ -134,3 +134,33 @@ export function formatLocalTime(iso: string): string {
 export function formatLocalShortDate(iso: string): string {
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(new Date(iso));
 }
+
+/**
+ * Sort comparator for today-scoped task lists (Today's Tasks, Tasks >
+ * Today): tasks scheduled for TODAY specifically — via Plan My Day's
+ * scheduledDate/scheduledStartTime, which is distinct from dueDate and
+ * never itself modified by this comparator — sort chronologically by
+ * their scheduled start time. Tasks without a scheduled time for today
+ * keep their existing relative order (this relies on Array.prototype.sort
+ * being a STABLE sort, guaranteed by the JS spec since ES2019) and always
+ * sort after any scheduled ones, never interleaved among them.
+ *
+ * Works correctly for a recurring occurrence override without any special
+ * casing: callers already resolve a recurring entry to its effective
+ * task object (the override when one exists, the series parent
+ * otherwise) before calling this — that resolved object's own
+ * scheduledDate/scheduledStartTime is exactly what's compared here, the
+ * same as for any ordinary task.
+ */
+export function compareByScheduledStartTime(
+  a: { scheduledDate?: string; scheduledStartTime?: string },
+  b: { scheduledDate?: string; scheduledStartTime?: string },
+  todayISO: string,
+): number {
+  const aTime = a.scheduledDate === todayISO ? a.scheduledStartTime : undefined;
+  const bTime = b.scheduledDate === todayISO ? b.scheduledStartTime : undefined;
+  if (aTime && bTime) return aTime.localeCompare(bTime);
+  if (aTime) return -1;
+  if (bTime) return 1;
+  return 0;
+}
