@@ -410,10 +410,21 @@ Deno.serve(async (req) => {
     const taskId = typeof item.taskId === 'string' ? item.taskId : null;
     if (!taskId || seenIds.has(taskId) || !validTaskIds.has(taskId)) continue;
     seenIds.add(taskId);
-    unscheduled.push({
-      taskId,
-      reason: typeof item.reason === 'string' ? item.reason.slice(0, 200) : null,
-    });
+    // The model's own free-text reason is intentionally discarded, not
+    // pattern-matched. Raw AI wording for "this didn't fit" varies
+    // unpredictably ("insufficient time remaining in day", "not enough
+    // time before natural end of day", etc.) even though every reason
+    // the model produces for its OWN unscheduled placements means
+    // exactly the same thing — the prompt only ever asks it to explain
+    // overpacking/timing here (see buildSystemPrompt's "put remaining
+    // task ids in unscheduled" instruction; it never authors a reason
+    // for an event conflict or a 5-minute gap conflict — those are
+    // always Timo's own deterministic rejectToUnscheduled calls below,
+    // untouched by this). So rather than matching dozens of possible AI
+    // phrasings, every model-authored unscheduled item gets the same
+    // fixed, Timo-controlled string — identical to the deterministic
+    // "no time left today" paths already used elsewhere in this file.
+    unscheduled.push({ taskId, reason: 'Not enough time left today.' });
   }
 
   // Anything the model forgot entirely still needs to show up somewhere —

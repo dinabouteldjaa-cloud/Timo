@@ -521,6 +521,10 @@ export default function PlanMyDayPage() {
               </div>
             )}
 
+            <Button variant="secondary" fullWidth onClick={runPlan}>
+              {t.planMyDay.tryAnotherPlan}
+            </Button>
+
             <div className="plan-my-day-actions">
               <Button variant="ghost" fullWidth onClick={handleBack}>
                 Cancel

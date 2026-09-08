@@ -44,6 +44,7 @@ const en = {
     timoEstimate: 'Timo estimate',
     showMore: 'Show {count} more',
     showLess: 'Show less',
+    tryAnotherPlan: 'Try another plan',
   },
   profile: {
     preferences: 'Preferences',

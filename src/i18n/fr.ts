@@ -41,6 +41,7 @@ const fr: Strings = {
     timoEstimate: 'Estimation de Timo',
     showMore: '{count} de plus',
     showLess: 'Afficher moins',
+    tryAnotherPlan: 'Essayer un autre plan',
   },
   profile: {
     preferences: 'Préférences',
